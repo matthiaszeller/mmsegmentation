@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 import requests
 import os.path as osp
 
+import torch.cuda
 from tqdm import tqdm
 
 # This should work out of the box with correct package versions and repo commit
@@ -100,12 +101,15 @@ model_name, config_name, checkpoint_name = (
 config_file = f'configs/{model_name}/{config_name}.py'
 checkpoint_file = f'../{checkpoint_name}'
 
+
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+print('using device', device)
 # build the model from a config file and a checkpoint file
-model = init_segmentor(config_file, checkpoint_file, device='cpu')
+model = init_segmentor(config_file, checkpoint_file, device=device)
 print(model)
 
 # test a single image and show the results
-img = 'demo/demo.png'  # or img = mmcv.imread(img), which will only load it once
+img = 'demo/demo_oct.jpg'  # or img = mmcv.imread(img), which will only load it once
 result = inference_segmentor(model, img)
 # visualize the results in a new window
 model.show_result(img, result, show=True)
