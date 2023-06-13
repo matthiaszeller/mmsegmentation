@@ -2,6 +2,7 @@ import hashlib
 import os
 import re
 from pathlib import Path
+from time import time
 from urllib.parse import urlparse
 
 import requests
@@ -106,14 +107,15 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print('using device', device)
 # build the model from a config file and a checkpoint file
 model = init_segmentor(config_file, checkpoint_file, device=device)
-print(model)
 
 # test a single image and show the results
 img = 'demo/demo_oct.jpg'  # or img = mmcv.imread(img), which will only load it once
+dt = time()
 result = inference_segmentor(model, img)
 # visualize the results in a new window
 model.show_result(img, result, out_file='out.jpg')
-print('written in file out.jpg')
+dt = time() - dt
+print(f'written in file out.jpg, took {dt:.4} s')
 
 ###
 
