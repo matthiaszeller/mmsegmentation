@@ -112,7 +112,8 @@ print(model)
 img = 'demo/demo_oct.jpg'  # or img = mmcv.imread(img), which will only load it once
 result = inference_segmentor(model, img)
 # visualize the results in a new window
-model.show_result(img, result, show=True)
+model.show_result(img, result, out_file='out.jpg')
+print('written in file out.jpg')
 
 ###
 
