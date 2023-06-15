@@ -1,3 +1,38 @@
+
+# IVOCT Segmentation
+
+
+## Setup
+
+### Path setup
+
+Some clusters might have special dedicated partitions for storage and scratch files.
+The easiest without changing mmseg config files is to make symbolic links in this folder:
+
+```shell
+ln -s <path-data> data          # for datasets
+ln -s <path-workdir> work_dirs  # for experiment logs
+```
+
+## Training tips
+
+### Debugging
+
+Using reduced amount of data:
+```shell
+cd data/shockwave/dataset/splits/segmentation
+head train.txt > train_debug.txt
+head val.txt > val_debug.txt
+```
+Then override the configuration with new split:
+```shell
+python tools/train.py <config> --cfg-options data.train.split=splits/segmentation/train_debug.txt data.val.split=splits/segmentation/val_debug.txt
+```
+
+---
+
+
+
 <div align="center">
   <img src="resources/mmseg-logo.png" width="600"/>
   <div>&nbsp;</div>
