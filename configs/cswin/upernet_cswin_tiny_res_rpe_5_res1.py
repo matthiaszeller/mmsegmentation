@@ -1,5 +1,5 @@
 _base_ = [
-    '../_base_/models/upernet_cswin2.py', '../_base_/datasets/pascal_voc12.py',
+    '../_base_/models/upernet_cswin2.py', '../_base_/datasets/ivoct.py',
     '../_base_/default_runtime.py', '../_base_/schedules/schedule_160k.py'
 ]
 model = dict(
@@ -34,11 +34,4 @@ lr_config = dict(_delete_=True, policy='poly',
                  warmup_ratio=1e-6,
                  power=1.0, min_lr=0.0, by_epoch=False)
 
-data=dict(samples_per_gpu=2)
-
-#         self.get_v = nn.Sequential(
-#                         nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1,groups=dim),
-#                         nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1)
-#         )
-
-# x = x + residual0
+data = dict(samples_per_gpu=2)
