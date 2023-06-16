@@ -43,3 +43,6 @@ data = dict(
         split='splits/segmentation/val_full.txt',
     )
 )
+
+workflow = [('train', 1)]
+evaluation = dict(_delete_=True)
