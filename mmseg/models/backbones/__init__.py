@@ -17,6 +17,7 @@ from .resnext import ResNeXt
 from .stdc import STDCContextPathNet, STDCNet
 from .swin import SwinTransformer
 from .cswin_transformer2 import CSWin2
+from .cswin_transformer import CSWin
 from .timm_backbone import TIMMBackbone
 from .twins import PCPVT, SVT
 from .unet import UNet
@@ -28,5 +29,5 @@ __all__ = [
     'VisionTransformer', 'SwinTransformer', 'MixVisionTransformer',
     'BiSeNetV1', 'BiSeNetV2', 'ICNet', 'TIMMBackbone', 'ERFNet', 'PCPVT',
     'SVT', 'STDCNet', 'STDCContextPathNet', 'BEiT', 'MAE',
-    'CSWin2'
+    'CSWin2', 'CSWin'
 ]
