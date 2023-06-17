@@ -1,5 +1,4 @@
-
-
+from pathlib import Path
 from time import time
 
 import torch.cuda
@@ -34,9 +33,8 @@ model_name, config_name, checkpoint_name = (
     'iter_153000.pth'
 )
 
-config_file = f'configs/{model_name}/{config_name}.py'
-checkpoint_file = f'../{checkpoint_name}'
-
+config_file = str(Path('configs').joinpath(model_name, config_name).with_suffix('.py'))
+checkpoint_file = str(Path('work_dirs').joinpath(config_name, checkpoint_name))
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print('using device', device)

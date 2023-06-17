@@ -4,7 +4,7 @@
 
 ## Setup
 
-### Path setup
+### Data & Checkpoint Path setup
 
 Some clusters might have special dedicated partitions for storage and scratch files.
 The easiest without changing mmseg config files is to make symbolic links in this folder:
@@ -13,6 +13,22 @@ The easiest without changing mmseg config files is to make symbolic links in thi
 ln -s <path-data> data          # for datasets
 ln -s <path-workdir> work_dirs  # for experiment logs
 ```
+
+### Verify installation - CPU & Single GPU 
+
+Run `get_started.py`, commenting out the model/configs you want to use. Start with the models that are built in 
+the mmsegmentation framework (i.e., not CSWin). You may want to use `tools/model_factory.py` to download checkpoints.
+For example
+```shell
+mkdir work_dirs/pspnet_r50-d8_512x1024_40k_cityscapes
+python -m tools.model_factory download -m pspnet_r50-d8_512x1024_40k_cityscapes -o work_dirs/pspnet_r50-d8_512x1024_40k_cityscapes
+```
+You can also run the model factory in interactive mode:
+```shell
+python -m tools.model_factory download
+```
+
+If everything runs smoothly, you have a file `out.jpg` in the cwd
 
 ## Training tips
 
