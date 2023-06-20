@@ -20,6 +20,7 @@ from mmengine.model import BaseModule
 from mmengine.runner import CheckpointLoader
 from timm.models.layers import DropPath, trunc_normal_
 
+from ..utils import PatchEmbed
 from mmseg.registry import MODELS
 
 
@@ -275,27 +276,56 @@ class Merge_Block(nn.Module):
 @MODELS.register_module()
 class CSWinTransformer(BaseModule):
     """
-    Vision Transformer with support for patch or hybrid CNN input stage
+    Vision Transformer with support for patch or hybrid CNN input stage.
+    Adapted from CSWinTransformer (https://arxiv.org/abs/2107.00652).
+
+    Args:
+        img_size (int | tuple): Input image size. Default: 224.
+        patch_size (int): The patch size. Default: 16.
+        in_channels (int): Number of input channels. Default: 3.
+        embed_dims (int): embedding dimension. Default: 64.
+        num_heads (tuple[int]): Parallel attention heads of each Swin
+            Transformer stage. Default: (3, 6, 12, 24).
+        mlp_ratio (int): ratio of mlp hidden dim to embedding dim.
+            Default: 4.
+        qkv_bias (bool): enable bias for qkv if True. Default: True.
+        drop_rate (float): Probability of an element to be zeroed.
+            Default 0.0
+        attn_drop_rate (float): The drop out rate for attention layer.
+            Default 0.0
+        drop_path_rate (float): stochastic depth rate. Default 0.0
+        norm_cfg (dict): Config dict for normalization layer.
+            Default: dict(type='LN')
+        patch_norm (bool): Whether to add a norm in PatchEmbed Block.
+            Default: True.
+        norm_eval (bool): Whether to set norm layers to eval mode, namely,
+            freeze running stats (mean and var). Note: Effect on Batch Norm
+            and its variants only. Default: False.
+        use_cp (bool): Use checkpoint or not. Using checkpoint will save
+            some memory while slowing down the training speed. Default: False.
+        init_cfg (dict or list[dict], optional): Initialization config dict.
+            Default: None.
     """
 
     def __init__(self,
                  img_size=224,
                  patch_size=4,
-                 in_chans=3,
-                 embed_dim=64,
-                 depth=[1, 2, 21, 1],
-                 split_size=7,
-                 num_heads=[1, 2, 4, 8],
+                 in_channels=3,
+                 embed_dims=64,
+                 depths=(1, 2, 21, 1),
+                 split_size=(1, 2, 7, 7),
+                 num_heads=(1, 2, 4, 8),
                  mlp_ratio=4.,
-                 qkv_bias=False,
+                 qkv_bias=True,
                  qk_scale=None,
                  drop_rate=0.,
                  attn_drop_rate=0.,
                  drop_path_rate=0.,
                  hybrid_backbone=None,
-                 use_chk=False,
+                 use_cp=False,
                  init_cfg=None,
-                 norm_cfg=dict(type='LN')):
+                 norm_cfg=dict(type='LN'),
+                 patch_norm=True):
         # TODO use patch_size and hybrid_backbone
         if patch_size != 4:
             raise NotImplementedError('original code of CSWin did not use the value of patch_size, change it')
@@ -303,39 +333,37 @@ class CSWinTransformer(BaseModule):
             raise NotImplementedError('original code of CSWin did not use the value of hybrid_backbone, change it')
 
         super().__init__(init_cfg=init_cfg)
-        self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
+        self.num_features = self.embed_dim = embed_dims  # num_features for consistency with other models
 
         heads = num_heads
-        self.use_chk = use_chk
+        self.use_chk = use_cp
+
         # Overlapping convolutional embeddings
-        # TODO replace by PatchEmbed, attention now by default it's padding=corner
-        #      in Swin old version, used zero padding (default of PatchEmbed), now it's corner
-        #      check same values if set default values accordingly
-        # TODO first step of CSWinBlock is to apply LayerNorm, could drop the one in patch embed ?
-        self.stage1_conv_embed = nn.Sequential(
-            # channels: in_chans -> embed dim
-            # img size: (H, W)   -> (W/4, H/4)
-            nn.Conv2d(in_chans, embed_dim, 7, 4, 2),
-            # non-CNN representation:
-            # we have wxh features of dimension c
-            # now a feature is a patch embedding
-            Rearrange('b c h w -> b (h w) c', h=img_size // 4, w=img_size // 4),
-            nn.LayerNorm(embed_dim)
+        # produces patches with (H, W) dimensions divided by 4
+        self.stage1_conv_embed = PatchEmbed(
+            in_channels=in_channels,
+            embed_dims=embed_dims,
+            conv_type='Conv2d',
+            kernel_size=7,
+            stride=4,
+            # in mmseg transformers, padding is now 'corner'
+            padding=2,
+            norm_cfg=norm_cfg if patch_norm else None,
+            init_cfg=None
         )
 
-        self.norm1 = build_norm_layer(norm_cfg, embed_dim)[1]
+        self.norm1 = build_norm_layer(norm_cfg, embed_dims)[1]
 
         # stochastic depth decay rule: linear drop probability 0 -> drop_path_rate
-        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, np.sum(depth))]
+        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, sum(depths))]
 
         # --- Stage 1
-        curr_dim = embed_dim
+        curr_dim = embed_dims
         self.stage1 = nn.ModuleList([
             CSWinBlock(
                 dim=curr_dim,
                 num_heads=heads[0],
-                # TODO modify patches_resolution params with dynamic vals
-                patches_resolution=224 // 4,
+                patches_resolution=img_size // 4,
                 mlp_ratio=mlp_ratio,
                 qkv_bias=qkv_bias,
                 qk_scale=qk_scale,
@@ -345,7 +373,7 @@ class CSWinTransformer(BaseModule):
                 drop_path=dpr[i],
                 norm_cfg=norm_cfg
             )
-            for i in range(depth[0])
+            for i in range(depths[0])
         ])
 
         self.merge1 = Merge_Block(curr_dim, curr_dim * (heads[1] // heads[0]))
@@ -357,18 +385,17 @@ class CSWinTransformer(BaseModule):
             CSWinBlock(
                 dim=curr_dim,
                 num_heads=heads[1],
-                # TODO modify patches_resolution params with dynamic vals
-                patches_resolution=224 // 8,
+                patches_resolution=img_size // 8,
                 mlp_ratio=mlp_ratio,
                 qkv_bias=qkv_bias,
                 qk_scale=qk_scale,
                 split_size=split_size[1],
                 drop=drop_rate,
                 attn_drop=attn_drop_rate,
-                drop_path=dpr[np.sum(depth[:1]) + i],
+                drop_path=dpr[np.sum(depths[:1]) + i],
                 norm_cfg=norm_cfg
             )
-            for i in range(depth[1])
+            for i in range(depths[1])
         ])
 
         self.merge2 = Merge_Block(curr_dim, curr_dim * (heads[2] // heads[1]))
@@ -380,18 +407,17 @@ class CSWinTransformer(BaseModule):
             CSWinBlock(
                 dim=curr_dim,
                 num_heads=heads[2],
-                # TODO modify patches_resolution params with dynamic vals
-                patches_resolution=224 // 16,
+                patches_resolution=img_size // 16,
                 mlp_ratio=mlp_ratio,
                 qkv_bias=qkv_bias,
                 qk_scale=qk_scale,
                 split_size=split_size[2],
                 drop=drop_rate,
                 attn_drop=attn_drop_rate,
-                drop_path=dpr[np.sum(depth[:2]) + i],
+                drop_path=dpr[np.sum(depths[:2]) + i],
                 norm_cfg=norm_cfg
             )
-            for i in range(depth[2])
+            for i in range(depths[2])
         ])
 
         self.merge3 = Merge_Block(curr_dim, curr_dim * (heads[3] // heads[2]))
@@ -402,18 +428,18 @@ class CSWinTransformer(BaseModule):
             CSWinBlock(
                 dim=curr_dim,
                 num_heads=heads[3],
-                patches_resolution=224 // 32,
+                patches_resolution=img_size // 32,
                 mlp_ratio=mlp_ratio,
                 qkv_bias=qkv_bias,
                 qk_scale=qk_scale,
                 split_size=split_size[-1],
                 drop=drop_rate,
                 attn_drop=attn_drop_rate,
-                drop_path=dpr[np.sum(depth[:-1]) + i],
+                drop_path=dpr[np.sum(depths[:-1]) + i],
                 norm_cfg=norm_cfg,
                 last_stage=True
             )
-            for i in range(depth[-1])
+            for i in range(depths[-1])
         ])
 
         self.norm4 = build_norm_layer(norm_cfg, curr_dim)[1]
@@ -495,17 +521,24 @@ class CSWinTransformer(BaseModule):
             self.load_state_dict(state_dict, strict=False)
 
     def save_out(self, x, norm, H, W):
+        """
+        Formats one level of the hierarchical model to be used by the decode head.
+        Args:
+            x: level output of shape (B, HxW, C)
+            norm: normalization of the layer
+            H: width resolution of the level
+            W: height resolution of the level
+
+        Returns:
+            x: level output of shape (B, C, H, W)
+        """
         x = norm(x)
         B, N, C = x.shape
         x = x.view(B, H, W, C).permute(0, 3, 1, 2).contiguous()
         return x
 
     def forward_features(self, x):
-        B = x.shape[0]
-        x = self.stage1_conv_embed[0](x)  ### B, C, H, W
-        B, C, H, W = x.size()
-        x = x.reshape(B, C, -1).transpose(-1, -2).contiguous()
-        x = self.stage1_conv_embed[2](x)
+        x, (H, W) = self.stage1_conv_embed(x)
 
         out = []
         for blk in self.stage1:
