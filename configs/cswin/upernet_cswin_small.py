@@ -5,12 +5,12 @@ _base_ = [
 model = dict(
     backbone=dict(
         type='CSWin',
-        embed_dim=64,
-        depth=[2,4,32,2],
+        embed_dims=64,
+        depths=[2,4,32,2],
         num_heads=[2,4,8,16],
         split_size=[1,2,7,7],
         drop_path_rate=0.4,
-        use_chk=False,
+        use_cp=False,
     ),
     decode_head=dict(
         in_channels=[64,128,256,512],
