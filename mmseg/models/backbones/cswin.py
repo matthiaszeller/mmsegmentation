@@ -14,14 +14,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
 from einops.layers.torch import Rearrange
-from mmcv.runner import CheckpointLoader, BaseModule, load_state_dict
+from mmcv.cnn import build_norm_layer
+from mmengine.logging import print_log
+from mmengine.model import BaseModule
+from mmengine.runner import CheckpointLoader
 from timm.models.layers import DropPath, trunc_normal_
 
-from mmengine.logging import print_log
 from mmseg.registry import MODELS
 
 
 class Mlp(nn.Module):
+    """Two-layer perceptron with dropout"""
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
         super().__init__()
         out_features = out_features or in_features
@@ -70,7 +73,6 @@ class LePEAttention(nn.Module):
         self.H_sp_ = self.H_sp
         self.W_sp_ = self.W_sp
 
-        stride = 1
         self.get_v = nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1, groups=dim)
 
         self.attn_drop = nn.Dropout(attn_drop)
@@ -155,7 +157,7 @@ class CSWinBlock(nn.Module):
     def __init__(self, dim, patches_resolution, num_heads,
                  split_size=7, mlp_ratio=4., qkv_bias=False, qk_scale=None,
                  drop=0., attn_drop=0., drop_path=0.,
-                 act_layer=nn.GELU, norm_layer=nn.LayerNorm,
+                 act_layer=nn.GELU, norm_cfg=dict(type='LN'),
                  last_stage=False):
         super().__init__()
         self.dim = dim
@@ -164,7 +166,7 @@ class CSWinBlock(nn.Module):
         self.split_size = split_size
         self.mlp_ratio = mlp_ratio
         self.qkv = nn.Linear(dim, dim * 3, bias=True)
-        self.norm1 = norm_layer(dim)
+        self.norm1 = build_norm_layer(norm_cfg, dim)[1]
 
         if last_stage:
             self.branch_num = 1
@@ -179,26 +181,32 @@ class CSWinBlock(nn.Module):
                     dim, resolution=self.patches_resolution, idx=-1,
                     split_size=split_size, num_heads=num_heads, dim_out=dim,
                     qkv_bias=qkv_bias, qk_scale=qk_scale,
-                    attn_drop=attn_drop, proj_drop=drop)
-                for i in range(self.branch_num)])
+                    attn_drop=attn_drop, proj_drop=drop
+                )
+                for i in range(self.branch_num)
+            ])
         else:
+            # Downsample by a factor 2
             self.attns = nn.ModuleList([
                 LePEAttention(
                     dim // 2, resolution=self.patches_resolution, idx=i,
                     split_size=split_size, num_heads=num_heads // 2, dim_out=dim // 2,
                     qkv_bias=qkv_bias, qk_scale=qk_scale,
-                    attn_drop=attn_drop, proj_drop=drop)
-                for i in range(self.branch_num)])
+                    attn_drop=attn_drop, proj_drop=drop
+                )
+                for i in range(self.branch_num)
+            ])
         mlp_hidden_dim = int(dim * mlp_ratio)
 
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, out_features=dim, act_layer=act_layer,
                        drop=drop)
-        self.norm2 = norm_layer(dim)
+        self.norm2 = build_norm_layer(norm_cfg, dim)[1]
 
         atten_mask_matrix = None
 
         self.register_buffer("atten_mask_matrix", atten_mask_matrix)
+        # Set by parent module
         self.H = None
         self.W = None
 
@@ -266,71 +274,149 @@ class Merge_Block(nn.Module):
 
 @MODELS.register_module()
 class CSWinTransformer(BaseModule):
-    """ Vision Transformer with support for patch or hybrid CNN input stage
+    """
+    Vision Transformer with support for patch or hybrid CNN input stage
     """
 
-    def __init__(self, img_size=224, patch_size=4, in_chans=3, embed_dim=64, depth=[1, 2, 21, 1], split_size=7,
-                 num_heads=[1, 2, 4, 8], mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
-                 drop_path_rate=0., hybrid_backbone=None, norm_layer=nn.LayerNorm, use_chk=False, init_cfg=None):
+    def __init__(self,
+                 img_size=224,
+                 patch_size=4,
+                 in_chans=3,
+                 embed_dim=64,
+                 depth=[1, 2, 21, 1],
+                 split_size=7,
+                 num_heads=[1, 2, 4, 8],
+                 mlp_ratio=4.,
+                 qkv_bias=False,
+                 qk_scale=None,
+                 drop_rate=0.,
+                 attn_drop_rate=0.,
+                 drop_path_rate=0.,
+                 hybrid_backbone=None,
+                 use_chk=False,
+                 init_cfg=None,
+                 norm_cfg=dict(type='LN')):
+        # TODO use patch_size and hybrid_backbone
+        if patch_size != 4:
+            raise NotImplementedError('original code of CSWin did not use the value of patch_size, change it')
+        if hybrid_backbone is not None:
+            raise NotImplementedError('original code of CSWin did not use the value of hybrid_backbone, change it')
+
         super().__init__(init_cfg=init_cfg)
         self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
 
         heads = num_heads
         self.use_chk = use_chk
+        # Overlapping convolutional embeddings
+        # TODO replace by PatchEmbed, attention now by default it's padding=corner
+        #      in Swin old version, used zero padding (default of PatchEmbed), now it's corner
+        #      check same values if set default values accordingly
+        # TODO first step of CSWinBlock is to apply LayerNorm, could drop the one in patch embed ?
         self.stage1_conv_embed = nn.Sequential(
+            # channels: in_chans -> embed dim
+            # img size: (H, W)   -> (W/4, H/4)
             nn.Conv2d(in_chans, embed_dim, 7, 4, 2),
+            # non-CNN representation:
+            # we have wxh features of dimension c
+            # now a feature is a patch embedding
             Rearrange('b c h w -> b (h w) c', h=img_size // 4, w=img_size // 4),
             nn.LayerNorm(embed_dim)
         )
 
-        self.norm1 = nn.LayerNorm(embed_dim)
+        self.norm1 = build_norm_layer(norm_cfg, embed_dim)[1]
 
+        # stochastic depth decay rule: linear drop probability 0 -> drop_path_rate
+        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, np.sum(depth))]
+
+        # --- Stage 1
         curr_dim = embed_dim
-        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, np.sum(depth))]  # stochastic depth decay rule
         self.stage1 = nn.ModuleList([
             CSWinBlock(
-                dim=curr_dim, num_heads=heads[0], patches_resolution=224 // 4, mlp_ratio=mlp_ratio,
-                qkv_bias=qkv_bias, qk_scale=qk_scale, split_size=split_size[0],
-                drop=drop_rate, attn_drop=attn_drop_rate,
-                drop_path=dpr[i], norm_layer=norm_layer)
-            for i in range(depth[0])])
+                dim=curr_dim,
+                num_heads=heads[0],
+                # TODO modify patches_resolution params with dynamic vals
+                patches_resolution=224 // 4,
+                mlp_ratio=mlp_ratio,
+                qkv_bias=qkv_bias,
+                qk_scale=qk_scale,
+                split_size=split_size[0],
+                drop=drop_rate,
+                attn_drop=attn_drop_rate,
+                drop_path=dpr[i],
+                norm_cfg=norm_cfg
+            )
+            for i in range(depth[0])
+        ])
 
         self.merge1 = Merge_Block(curr_dim, curr_dim * (heads[1] // heads[0]))
+
+        # --- Stage 2
         curr_dim = curr_dim * (heads[1] // heads[0])
-        self.norm2 = nn.LayerNorm(curr_dim)
-        self.stage2 = nn.ModuleList(
-            [CSWinBlock(
-                dim=curr_dim, num_heads=heads[1], patches_resolution=224 // 8, mlp_ratio=mlp_ratio,
-                qkv_bias=qkv_bias, qk_scale=qk_scale, split_size=split_size[1],
-                drop=drop_rate, attn_drop=attn_drop_rate,
-                drop_path=dpr[np.sum(depth[:1]) + i], norm_layer=norm_layer)
-                for i in range(depth[1])])
+        self.norm2 = build_norm_layer(norm_cfg, curr_dim)[1]
+        self.stage2 = nn.ModuleList([
+            CSWinBlock(
+                dim=curr_dim,
+                num_heads=heads[1],
+                # TODO modify patches_resolution params with dynamic vals
+                patches_resolution=224 // 8,
+                mlp_ratio=mlp_ratio,
+                qkv_bias=qkv_bias,
+                qk_scale=qk_scale,
+                split_size=split_size[1],
+                drop=drop_rate,
+                attn_drop=attn_drop_rate,
+                drop_path=dpr[np.sum(depth[:1]) + i],
+                norm_cfg=norm_cfg
+            )
+            for i in range(depth[1])
+        ])
 
         self.merge2 = Merge_Block(curr_dim, curr_dim * (heads[2] // heads[1]))
-        curr_dim = curr_dim * (heads[2] // heads[1])
-        self.norm3 = nn.LayerNorm(curr_dim)
-        temp_stage3 = []
-        temp_stage3.extend(
-            [CSWinBlock(
-                dim=curr_dim, num_heads=heads[2], patches_resolution=224 // 16, mlp_ratio=mlp_ratio,
-                qkv_bias=qkv_bias, qk_scale=qk_scale, split_size=split_size[2],
-                drop=drop_rate, attn_drop=attn_drop_rate,
-                drop_path=dpr[np.sum(depth[:2]) + i], norm_layer=norm_layer)
-                for i in range(depth[2])])
 
-        self.stage3 = nn.ModuleList(temp_stage3)
+        # --- Stage 3
+        curr_dim = curr_dim * (heads[2] // heads[1])
+        self.norm3 = build_norm_layer(norm_cfg, curr_dim)[1]
+        self.stage3 = nn.ModuleList([
+            CSWinBlock(
+                dim=curr_dim,
+                num_heads=heads[2],
+                # TODO modify patches_resolution params with dynamic vals
+                patches_resolution=224 // 16,
+                mlp_ratio=mlp_ratio,
+                qkv_bias=qkv_bias,
+                qk_scale=qk_scale,
+                split_size=split_size[2],
+                drop=drop_rate,
+                attn_drop=attn_drop_rate,
+                drop_path=dpr[np.sum(depth[:2]) + i],
+                norm_cfg=norm_cfg
+            )
+            for i in range(depth[2])
+        ])
 
         self.merge3 = Merge_Block(curr_dim, curr_dim * (heads[3] // heads[2]))
-        curr_dim = curr_dim * (heads[3] // heads[2])
-        self.stage4 = nn.ModuleList(
-            [CSWinBlock(
-                dim=curr_dim, num_heads=heads[3], patches_resolution=224 // 32, mlp_ratio=mlp_ratio,
-                qkv_bias=qkv_bias, qk_scale=qk_scale, split_size=split_size[-1],
-                drop=drop_rate, attn_drop=attn_drop_rate,
-                drop_path=dpr[np.sum(depth[:-1]) + i], norm_layer=norm_layer, last_stage=True)
-                for i in range(depth[-1])])
 
-        self.norm4 = norm_layer(curr_dim)
+        # --- Stage 4
+        curr_dim = curr_dim * (heads[3] // heads[2])
+        self.stage4 = nn.ModuleList([
+            CSWinBlock(
+                dim=curr_dim,
+                num_heads=heads[3],
+                patches_resolution=224 // 32,
+                mlp_ratio=mlp_ratio,
+                qkv_bias=qkv_bias,
+                qk_scale=qk_scale,
+                split_size=split_size[-1],
+                drop=drop_rate,
+                attn_drop=attn_drop_rate,
+                drop_path=dpr[np.sum(depth[:-1]) + i],
+                norm_cfg=norm_cfg,
+                last_stage=True
+            )
+            for i in range(depth[-1])
+        ])
+
+        self.norm4 = build_norm_layer(norm_cfg, curr_dim)[1]
 
     def init_weights(self):
         def _init_weights(m):
@@ -342,9 +428,13 @@ class CSWinTransformer(BaseModule):
                 nn.init.constant_(m.bias, 0)
                 nn.init.constant_(m.weight, 1.0)
 
-        if self.init_cfg is not None:
-            self.apply(_init_weights)
+        self.apply(_init_weights)
 
+        if self.init_cfg is None:
+            print_log(f'No pre-trained weights for {self.__class__.__name__}, '
+                      f'training start from scratch')
+
+        else:
             assert 'checkpoint' in self.init_cfg, 'specify `pretrained` in `init_cfg`'
             state_dict = CheckpointLoader.load_checkpoint(
                 self.init_cfg['checkpoint'], logger=None, map_location='cpu')
@@ -403,12 +493,6 @@ class CSWinTransformer(BaseModule):
 
             # load state_dict
             self.load_state_dict(state_dict, strict=False)
-
-        else:
-            print_log(f'No pre-trained weights for '
-                           f'{self.__class__.__name__}, '
-                           f'training start from scratch')
-            self.apply(_init_weights)
 
     def save_out(self, x, norm, H, W):
         x = norm(x)

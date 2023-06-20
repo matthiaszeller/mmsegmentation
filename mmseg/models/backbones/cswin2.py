@@ -4,27 +4,19 @@
 # Licensed under the MIT License.
 # written By Xiaoyi Dong
 # ------------------------------------------
+from collections import OrderedDict
 
-
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from functools import partial
-
-from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
-from timm.models.helpers import load_pretrained
-from timm.models.layers import DropPath, to_2tuple, trunc_normal_
-from timm.models.resnet import resnet26d, resnet50d
-from timm.models.registry import register_model
-from einops.layers.torch import Rearrange
-import numpy as np
-import time
-
-from mmcv_custom.checkpoint import load_checkpoint
-from mmseg.utils import get_root_logger
-from ..builder import BACKBONES
-
 import torch.utils.checkpoint as checkpoint
+from einops.layers.torch import Rearrange
+from mmengine.logging import print_log
+from mmengine.runner import CheckpointLoader
+from timm.models.layers import DropPath, trunc_normal_
+
+from ..builder import BACKBONES
 
 
 class Mlp(nn.Module):
@@ -488,7 +480,7 @@ class Merge_Block(nn.Module):
 #         return x, H, W
 
 @BACKBONES.register_module()
-class CSWin2(nn.Module):
+class CSWinTransformer2(nn.Module):
     """ Vision Transformer with support for patch or hybrid CNN input stage
     """
     def __init__(self, img_size=224, patch_size=4, in_chans=3, embed_dim=64, depth=[1,2,21,1], split_size = 7, s=[4,4,4],
@@ -561,7 +553,7 @@ class CSWin2(nn.Module):
        
         self.norm4 = norm_layer(curr_dim)
 
-    def init_weights(self, pretrained=None):
+    def init_weights(self):
         def _init_weights(m):
             if isinstance(m, nn.Linear):
                 trunc_normal_(m.weight, std=.02)
@@ -570,14 +562,72 @@ class CSWin2(nn.Module):
             elif isinstance(m, (nn.LayerNorm, nn.BatchNorm2d)):
                 nn.init.constant_(m.bias, 0)
                 nn.init.constant_(m.weight, 1.0)
-        if isinstance(pretrained, str):
-            self.apply(_init_weights)
-            logger = get_root_logger()
-            load_checkpoint(self, pretrained, strict=False, logger=logger)
-        elif pretrained is None:
-            self.apply(_init_weights)
+
+        self.apply(_init_weights)
+
+        if self.init_cfg is None:
+            print_log(f'No pre-trained weights for {self.__class__.__name__}, '
+                      f'training start from scratch')
+
         else:
-            raise TypeError('pretrained must be a str or None')
+            assert 'checkpoint' in self.init_cfg, 'specify `pretrained` in `init_cfg`'
+            state_dict = CheckpointLoader.load_checkpoint(
+                self.init_cfg['checkpoint'], logger=None, map_location='cpu')
+
+            if 'state_dict' in state_dict:
+                _state_dict = state_dict['state_dict']
+            else:
+                _state_dict = state_dict
+
+            state_dict = OrderedDict()
+            # strip prefix of backbone
+            for k, v in _state_dict.items():
+                if k.startswith('backbone.'):
+                    state_dict[k[9:]] = v
+                else:
+                    state_dict[k] = v
+
+            # strip prefix of state_dict
+            if list(state_dict.keys())[0].startswith('module.'):
+                state_dict = {k[7:]: v for k, v in state_dict.items()}
+
+            # skip "for MoBY, load model of online branch" of mmcv_custom.checkpoint.load_checkpoint
+
+            # reshape absolute position embedding -- copy-paste of swin, same in mmcv_custom (up to contiguous())
+            if state_dict.get('absolute_pos_embed') is not None:
+                absolute_pos_embed = state_dict['absolute_pos_embed']
+                N1, L, C1 = absolute_pos_embed.size()
+                N2, C2, H, W = self.absolute_pos_embed.size()
+                if N1 != N2 or C1 != C2 or L != H * W:
+                    print_log('Error in loading absolute_pos_embed, pass')
+                else:
+                    state_dict['absolute_pos_embed'] = absolute_pos_embed.view(
+                        N2, H, W, C2).permute(0, 3, 1, 2).contiguous()
+
+            # interpolate position bias table if needed -- copy-paste of swin, same as mmcv_custom up to contiguous()
+            relative_position_bias_table_keys = [
+                k for k in state_dict.keys()
+                if 'relative_position_bias_table' in k
+            ]
+            for table_key in relative_position_bias_table_keys:
+                table_pretrained = state_dict[table_key]
+                table_current = self.state_dict()[table_key]
+                L1, nH1 = table_pretrained.size()
+                L2, nH2 = table_current.size()
+                if nH1 != nH2:
+                    print_log(f'Error in loading {table_key}, pass')
+                elif L1 != L2:
+                    S1 = int(L1**0.5)
+                    S2 = int(L2**0.5)
+                    table_pretrained_resized = F.interpolate(
+                        table_pretrained.permute(1, 0).reshape(1, nH1, S1, S1),
+                        size=(S2, S2),
+                        mode='bicubic')
+                    state_dict[table_key] = table_pretrained_resized.view(
+                        nH2, L2).permute(1, 0).contiguous()
+
+            # load state_dict
+            self.load_state_dict(state_dict, strict=False)
 
     def save_out(self, x, norm, H, W):
         x = norm(x)
