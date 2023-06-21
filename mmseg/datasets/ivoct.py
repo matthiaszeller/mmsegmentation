@@ -1,23 +1,33 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import os.path as osp
 
-from .builder import DATASETS
-from .custom import CustomDataset
+import mmengine.fileio as fileio
+from mmseg.registry import DATASETS
+from .basesegdataset import BaseSegDataset
 
 
 @DATASETS.register_module()
-class IVOCTDataset(CustomDataset):
+class IVOCTDataset(BaseSegDataset):
     """Pascal VOC dataset.
 
     Args:
-        split (str): Split txt file
+        ann_file (str): split txt file
     """
 
-    CLASSES = ('background', 'calcium')
+    METAINFO = dict(
+        classes=('background', 'calcium'),
+        palette=[[0, 0, 0], [255, 0, 0]]
+    )
 
-    PALETTE = [[0, 0, 0], [255, 0, 0]]
-
-    def __init__(self, split, **kwargs):
-        super(IVOCTDataset, self).__init__(
-            img_suffix='.jpg', seg_map_suffix='.png', split=split, **kwargs)
-        assert osp.exists(self.img_dir) and self.split is not None
+    def __init__(self,
+                 ann_file,
+                 img_suffix='.jpg',
+                 seg_map_suffix='.png',
+                 **kwargs) -> None:
+        super().__init__(
+            img_suffix=img_suffix,
+            seg_map_suffix=seg_map_suffix,
+            ann_file=ann_file,
+            **kwargs)
+        assert fileio.exists(self.data_prefix['img_path'],
+                             self.backend_args) and osp.isfile(self.ann_file)
