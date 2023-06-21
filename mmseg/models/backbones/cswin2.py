@@ -16,26 +16,9 @@ from mmengine.logging import print_log
 from mmengine.runner import CheckpointLoader
 from timm.models.layers import DropPath, trunc_normal_
 
+from .cswin import Mlp
 from ..builder import BACKBONES
 
-
-class Mlp(nn.Module):
-    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
-        super().__init__()
-        out_features = out_features or in_features
-        hidden_features = hidden_features or in_features
-        self.fc1 = nn.Linear(in_features, hidden_features)
-        self.act = act_layer()
-        self.fc2 = nn.Linear(hidden_features, out_features)
-        self.drop = nn.Dropout(drop)
-
-    def forward(self, x):
-        x = self.fc1(x)
-        x = self.act(x)
-        x = self.drop(x)
-        x = self.fc2(x)
-        x = self.drop(x)
-        return x
 
 # class Feedforward(nn.Module):
 #     def __init__(self, in_features, hidden_features, drop=0.):
@@ -98,7 +81,6 @@ class LePEAttention(nn.Module):
         self.H_sp_ = self.H_sp
         self.W_sp_ = self.W_sp
 
-#         stride = 1
         self.get_v = nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1,groups=dim)
         self.get_v1 = nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1)
 

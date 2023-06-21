@@ -4,7 +4,6 @@ _base_ = [
 ]
 model = dict(
     backbone=dict(
-        type='CSWin2',
         embed_dim=64,
         img_size=512,
         depth=[1,2,21,1],
