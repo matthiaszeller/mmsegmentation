@@ -45,9 +45,29 @@ class Mlp(nn.Module):
 
 
 class LePEAttention(nn.Module):
-    def __init__(self, dim, resolution, idx, split_size=7, dim_out=None, num_heads=8, qkv_bias=False, qk_scale=None,
-                 attn_drop=0., proj_drop=0.):
-        """Not supported now, since we have cls_tokens now.....
+    def __init__(self, dim,
+                 resolution,
+                 idx,
+                 split_size=7,
+                 dim_out=None,
+                 num_heads=8,
+                 qkv_bias=False,
+                 qk_scale=None,
+                 attn_drop=0.,
+                 proj_drop=0.):
+        """
+
+        Args:
+            dim: channel dimension of the stage
+            resolution: patch resolution of the stage, should be initial_resolution / 2**(stage_idx+1)
+            idx:
+            split_size:
+            dim_out:
+            num_heads:
+            qkv_bias:
+            qk_scale:
+            attn_drop:
+            proj_drop:
         """
         super().__init__()
         self.dim = dim
@@ -68,12 +88,15 @@ class LePEAttention(nn.Module):
         else:
             print("ERROR MODE", idx)
             exit(0)
+        # Dimensions of split window
         self.H_sp = H_sp
         self.W_sp = W_sp
 
         self.H_sp_ = self.H_sp
         self.W_sp_ = self.W_sp
 
+        # with groups=in_channels, each input channel is convolved independently
+        #
         self.get_v = nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1, groups=dim)
 
         self.attn_drop = nn.Dropout(attn_drop)
@@ -116,7 +139,7 @@ class LePEAttention(nn.Module):
         self.H_sp = H_sp
         self.W_sp = W_sp
 
-        ### padding for split window
+        # padding for split window
         H_pad = (self.H_sp - H % self.H_sp) % self.H_sp
         W_pad = (self.W_sp - W % self.W_sp) % self.W_sp
         top_pad = H_pad // 2
@@ -161,11 +184,16 @@ class CSWinBlock(nn.Module):
                  act_layer=nn.GELU, norm_cfg=dict(type='LN'),
                  last_stage=False):
         super().__init__()
+
+        assert num_heads % 2 == 0, f'num_heads must be even, got {num_heads}'
+
         self.dim = dim
-        self.num_heads = num_heads
+        #self.num_heads = num_heads
         self.patches_resolution = patches_resolution
         self.split_size = split_size
         self.mlp_ratio = mlp_ratio
+        # The dimension of projection subspace is constant, but dimensions will be dispatched among heads
+        # i.e.,
         self.qkv = nn.Linear(dim, dim * 3, bias=True)
         self.norm1 = build_norm_layer(norm_cfg, dim)[1]
 
@@ -187,7 +215,10 @@ class CSWinBlock(nn.Module):
                 for i in range(self.branch_num)
             ])
         else:
-            # Downsample by a factor 2
+            # Two branches for horizontal and vertical
+            # heads are evenly split into the two groups
+            # recall that the dimension of the QKV subspace is fixed and splitted across heads and horizontal/vertical
+            #
             self.attns = nn.ModuleList([
                 LePEAttention(
                     dim // 2, resolution=self.patches_resolution, idx=i,
@@ -220,8 +251,12 @@ class CSWinBlock(nn.Module):
         W = self.W
         assert L == H * W, "flatten img_tokens has wrong size"
         img = self.norm1(x)
+        # Get query, key, value projections
         temp = self.qkv(img).reshape(B, H, W, 3, C).permute(0, 3, 4, 1, 2)
+        # temp shape (B, 3, C, H, W)$
 
+        # C indexes the dimension of the QKV projection,
+        # we split this dimension between horizontal and vertical stripes
         if self.branch_num == 2:
             x1 = self.attns[0](temp[:, :, :C // 2, :, :])
             x2 = self.attns[1](temp[:, :, C // 2:, :, :])
@@ -371,7 +406,8 @@ class CSWinTransformer(BaseModule):
                 drop=drop_rate,
                 attn_drop=attn_drop_rate,
                 drop_path=dpr[i],
-                norm_cfg=norm_cfg
+                norm_cfg=norm_cfg,
+                last_stage=False
             )
             for i in range(depths[0])
         ])
@@ -393,7 +429,8 @@ class CSWinTransformer(BaseModule):
                 drop=drop_rate,
                 attn_drop=attn_drop_rate,
                 drop_path=dpr[np.sum(depths[:1]) + i],
-                norm_cfg=norm_cfg
+                norm_cfg=norm_cfg,
+                last_stage=False
             )
             for i in range(depths[1])
         ])
@@ -415,7 +452,8 @@ class CSWinTransformer(BaseModule):
                 drop=drop_rate,
                 attn_drop=attn_drop_rate,
                 drop_path=dpr[np.sum(depths[:2]) + i],
-                norm_cfg=norm_cfg
+                norm_cfg=norm_cfg,
+                last_stage=False
             )
             for i in range(depths[2])
         ])
