@@ -60,5 +60,7 @@ default_hooks = dict(
     # Adjust logging interval
     logger=dict(interval=10),
     # Checkpointing
-    checkpoint=dict(save_best='mIoU', rule='greater'),
+    checkpoint=dict(save_best='metric/mIoU', rule='greater'),
 )
+# Evaluate more often, takes few seconds only in this config
+train_cfg = dict(val_interval=200)
