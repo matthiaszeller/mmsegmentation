@@ -55,31 +55,6 @@ val_dataloader = dict(
     )
 )
 
-data = dict(
-    samples_per_gpu=2,
-    workers_per_gpu=4,
-    train=dict(
-        type=dataset_type,
-        data_root=data_root,
-        img_dir='images',
-        ann_dir='labels',
-        split='splits/segmentation/train.txt',
-        pipeline=train_pipeline),
-    val=dict(
-        type=dataset_type,
-        data_root=data_root,
-        img_dir='images',
-        ann_dir='labels',
-        split='splits/segmentation/val.txt',
-        pipeline=test_pipeline),
-    test=dict(
-        type=dataset_type,
-        data_root=data_root,
-        img_dir='images',
-        ann_dir='labels',
-        split='splits/segmentation/val.txt',
-        pipeline=test_pipeline))
-
 test_dataloader = val_dataloader
 
 val_evaluator = dict(type='ClassIoUMetric', iou_metrics=['mIoU'])
