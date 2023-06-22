@@ -56,7 +56,9 @@ train_dataloader = dict(batch_size=16)
 val_dataloader = dict(batch_size=1)
 test_dataloader = val_dataloader
 
-# Adjust logging interval
 default_hooks = dict(
+    # Adjust logging interval
     logger=dict(interval=10),
+    # Checkpointing
+    checkpoint=dict(save_best='mIoU', rule='greater'),
 )
