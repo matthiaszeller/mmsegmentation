@@ -58,9 +58,9 @@ test_dataloader = val_dataloader
 
 default_hooks = dict(
     # Adjust logging interval
-    logger=dict(interval=10),
+    logger=dict(interval=20),
     # Checkpointing
-    checkpoint=dict(save_best='metric/mIoU', rule='greater'),
+    checkpoint=dict(save_best='metric/mIoU', rule='greater', max_keep_ckpts=10),
 )
 # Evaluate more often, takes few seconds only in this config
 train_cfg = dict(val_interval=200)
