@@ -37,6 +37,7 @@ class SegLocalVisualizer(Visualizer):
             Defaults to None.
         alpha (int, float): The transparency of segmentation mask.
                 Defaults to 0.8.
+        no_draw (tuple, optional): the indices of the classes that should not be drawn
 
     Examples:
         >>> import numpy as np
@@ -71,10 +72,12 @@ class SegLocalVisualizer(Visualizer):
                  palette: Optional[List] = None,
                  dataset_name: Optional[str] = None,
                  alpha: float = 0.8,
+                 no_draw=None,
                  **kwargs):
         super().__init__(name, image, vis_backends, save_dir, **kwargs)
         self.alpha: float = alpha
         self.set_dataset_meta(palette, classes, dataset_name)
+        self.no_draw = set(no_draw)
 
     def _draw_sem_seg(self, image: np.ndarray, sem_seg: PixelData,
                       classes: Optional[List],
@@ -112,8 +115,9 @@ class SegLocalVisualizer(Visualizer):
 
         # draw semantic masks
         for label, color in zip(labels, colors):
+            alpha = 0. if label in self.no_draw else self.alpha
             self.draw_binary_masks(
-                sem_seg == label, colors=[color], alphas=self.alpha)
+                sem_seg == label, colors=[color], alphas=alpha)
 
         return self.get_image()
 
