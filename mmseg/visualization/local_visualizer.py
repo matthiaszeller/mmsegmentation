@@ -113,8 +113,7 @@ class SegLocalVisualizer(Visualizer):
         self.set_image(image)
 
         # draw semantic masks
-        if no_draw is not None:
-            no_draw = set(no_draw)
+        no_draw = set() if no_draw is None else set(no_draw)
 
         for label, color in zip(labels, colors):
             alpha = 0. if label in no_draw else self.alpha
