@@ -21,7 +21,7 @@ class IVOCTDataset(BaseSegDataset):
 
     def __init__(self,
                  ann_file,
-                 img_suffix='.jpg',
+                 img_suffix='.png',
                  seg_map_suffix='.png',
                  **kwargs) -> None:
         super().__init__(
@@ -30,4 +30,4 @@ class IVOCTDataset(BaseSegDataset):
             ann_file=ann_file,
             **kwargs)
         assert fileio.exists(self.data_prefix['img_path'],
-                             self.backend_args) and osp.isfile(self.ann_file)
+                             self.backend_args) #and osp.isfile(self.ann_file)
