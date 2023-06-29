@@ -72,16 +72,15 @@ class SegLocalVisualizer(Visualizer):
                  palette: Optional[List] = None,
                  dataset_name: Optional[str] = None,
                  alpha: float = 0.8,
-                 no_draw=None,
                  **kwargs):
         super().__init__(name, image, vis_backends, save_dir, **kwargs)
         self.alpha: float = alpha
         self.set_dataset_meta(palette, classes, dataset_name)
-        self.no_draw = set(no_draw)
 
     def _draw_sem_seg(self, image: np.ndarray, sem_seg: PixelData,
                       classes: Optional[List],
-                      palette: Optional[List]) -> np.ndarray:
+                      palette: Optional[List],
+                      no_draw: Optional[tuple] = None) -> np.ndarray:
         """Draw semantic seg of GT or prediction.
 
         Args:
@@ -114,8 +113,11 @@ class SegLocalVisualizer(Visualizer):
         self.set_image(image)
 
         # draw semantic masks
+        if no_draw is not None:
+            no_draw = set(no_draw)
+
         for label, color in zip(labels, colors):
-            alpha = 0. if label in self.no_draw else self.alpha
+            alpha = 0. if label in no_draw else self.alpha
             self.draw_binary_masks(
                 sem_seg == label, colors=[color], alphas=alpha)
 
@@ -163,6 +165,8 @@ class SegLocalVisualizer(Visualizer):
             draw_pred: bool = True,
             show: bool = False,
             wait_time: float = 0,
+            # custom
+            no_draw: Optional[tuple] = None,
             # TODO: Supported in mmengine's Viusalizer.
             out_file: Optional[str] = None,
             step: int = 0) -> None:
@@ -206,7 +210,7 @@ class SegLocalVisualizer(Visualizer):
                                         'segmentation results.'
             gt_img_data = self._draw_sem_seg(gt_img_data,
                                              data_sample.gt_sem_seg, classes,
-                                             palette)
+                                             palette, no_draw=no_draw)
 
         if (draw_pred and data_sample is not None
                 and 'pred_sem_seg' in data_sample):
@@ -217,7 +221,7 @@ class SegLocalVisualizer(Visualizer):
                                         'segmentation results.'
             pred_img_data = self._draw_sem_seg(pred_img_data,
                                                data_sample.pred_sem_seg,
-                                               classes, palette)
+                                               classes, palette, no_draw=no_draw)
 
         if gt_img_data is not None and pred_img_data is not None:
             drawn_img = np.concatenate((gt_img_data, pred_img_data), axis=1)
