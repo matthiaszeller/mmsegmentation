@@ -197,7 +197,8 @@ class MMSegInferencer(BaseInferencer):
                   wait_time: int = 0,
                   img_out_dir: str = '',
                   opacity: float = 0.8,
-                  no_draw=None) -> List[np.ndarray]:
+                  no_draw=None,
+                  draw_gt: bool = False) -> List[np.ndarray]:
         """Visualize predictions.
 
         Args:
@@ -248,7 +249,7 @@ class MMSegInferencer(BaseInferencer):
                 pred,
                 show=show,
                 wait_time=wait_time,
-                draw_gt=False,
+                draw_gt=draw_gt,
                 draw_pred=True,
                 out_file=out_file,
                 no_draw=no_draw)
