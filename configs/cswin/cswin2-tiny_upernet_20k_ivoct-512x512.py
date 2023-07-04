@@ -1,6 +1,6 @@
 _base_ = [
     '../_base_/models/upernet_cswin2.py', '../_base_/datasets/ivoct.py',
-    '../_base_/default_runtime.py', '../_base_/schedules/schedule_20k.py'
+    '../_base_/default_runtime.py', '../_base_/schedules/schedule_160k.py'
 ]
 crop_size = (512, 512)
 data_preprocessor = dict(size=crop_size)
@@ -38,16 +38,16 @@ optim_wrapper = dict(
             'norm': dict(decay_mult=0.)
         }))
 
-_warmup_iter = 180
+warmup_iters = 180
 param_scheduler = [
     dict(
-        type='LinearLR', start_factor=1e-6, by_epoch=False, begin=0, end=_warmup_iter),
+        type='LinearLR', start_factor=1e-6, by_epoch=False, begin=0, end=warmup_iters),
     dict(
         type='PolyLR',
         eta_min=0.0,
         power=1.0,
-        begin=_warmup_iter,
-        end=160000,
+        begin=warmup_iters,
+        end=20000,
         by_epoch=False,
     )
 ]

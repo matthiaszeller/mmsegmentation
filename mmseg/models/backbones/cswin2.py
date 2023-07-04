@@ -1,9 +1,4 @@
-# ------------------------------------------
-# CSWin Transformer
-# Copyright (c) Microsoft Corporation.
-# Licensed under the MIT License.
-# written By Xiaoyi Dong
-# ------------------------------------------
+
 from collections import OrderedDict
 
 import numpy as np
@@ -11,13 +6,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
-from einops.layers.torch import Rearrange
+from mmcv.cnn import build_norm_layer
 from mmengine.logging import print_log
+from mmengine.model import BaseModule
 from mmengine.runner import CheckpointLoader
 from timm.models.layers import DropPath, trunc_normal_
 
-from .cswin import Mlp
-from ..builder import BACKBONES
+from mmseg.registry import MODELS
+from .cswin import Mlp, img2windows, windows2img
+from ..utils import PatchEmbed
 
 
 # class Feedforward(nn.Module):
@@ -53,7 +50,8 @@ from ..builder import BACKBONES
 #         return x
 
 class LePEAttention(nn.Module):
-    def __init__(self, dim, resolution, idx, split_size=7, dim_out=None, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0.):
+    def __init__(self, dim, resolution, idx, split_size=7, dim_out=None, num_heads=8, qkv_bias=False, qk_scale=None,
+                 attn_drop=0., proj_drop=0.):
         """Not supported now, since we have cls_tokens now.....
         """
         super().__init__()
@@ -73,7 +71,7 @@ class LePEAttention(nn.Module):
         elif idx == 1:
             W_sp, H_sp = self.resolution, self.split_size
         else:
-            print ("ERROR MODE", idx)
+            print("ERROR MODE", idx)
             exit(0)
         self.H_sp = H_sp
         self.W_sp = W_sp
@@ -81,46 +79,46 @@ class LePEAttention(nn.Module):
         self.H_sp_ = self.H_sp
         self.W_sp_ = self.W_sp
 
-        self.get_v = nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1,groups=dim)
+        self.get_v = nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1, groups=dim)
         self.get_v1 = nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1)
 
-#         self.get_v = nn.Conv2d(dim, dim, kernel_size=1, stride=1)
+        #         self.get_v = nn.Conv2d(dim, dim, kernel_size=1, stride=1)
 
-#         self.get_v = nn.Sequential(
-#                         nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1,groups=dim),
-#                         nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1)
-#         )
-#         self.get_v = nn.Conv2d(dim//2, dim//2, kernel_size=3, stride=1, padding=1,groups=dim//2)
-#         self.get_v1 = nn.Conv2d(dim//2, dim//2, kernel_size=3, stride=1, padding=1)
+        #         self.get_v = nn.Sequential(
+        #                         nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1,groups=dim),
+        #                         nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1)
+        #         )
+        #         self.get_v = nn.Conv2d(dim//2, dim//2, kernel_size=3, stride=1, padding=1,groups=dim//2)
+        #         self.get_v1 = nn.Conv2d(dim//2, dim//2, kernel_size=3, stride=1, padding=1)
 
         self.attn_drop = nn.Dropout(attn_drop)
 
     def im2cswin(self, x):
         B, C, H, W = x.shape
         x = img2windows(x, self.H_sp, self.W_sp)
-        x = x.reshape(-1, self.H_sp* self.W_sp, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3).contiguous()
+        x = x.reshape(-1, self.H_sp * self.W_sp, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3).contiguous()
         return x
 
     def get_rpe(self, x, func, func1):
         B, C, H, W = x.shape
         H_sp, W_sp = self.H_sp, self.W_sp
         x = x.view(B, C, H // H_sp, H_sp, W // W_sp, W_sp)
-        x = x.permute(0, 2, 4, 1, 3, 5).contiguous().reshape(-1, C, H_sp, W_sp) ### B', C, H', W'
+        x = x.permute(0, 2, 4, 1, 3, 5).contiguous().reshape(-1, C, H_sp, W_sp)  ### B', C, H', W'
         B, C, H, W = x.shape
 
-#         xs = torch.chunk(x, 2, 1)
+        #         xs = torch.chunk(x, 2, 1)
 
-#         rpe = func(x) ### B', C, H', W'
-        rpe = func1(x+func(x))
+        #         rpe = func(x) ### B', C, H', W'
+        rpe = func1(x + func(x))
 
-#         rpe0 = func(xs[0])
-#         rpe0 = nn.functional.gelu(self.ln(rpe0))
-#         rpe = self.get_v1(xs[1]+rpe0)
-#         rpe = nn.functional.gelu(self.ln(rpe))
-#         rpe = torch.cat((rpe0, rpe),1)
+        #         rpe0 = func(xs[0])
+        #         rpe0 = nn.functional.gelu(self.ln(rpe0))
+        #         rpe = self.get_v1(xs[1]+rpe0)
+        #         rpe = nn.functional.gelu(self.ln(rpe))
+        #         rpe = torch.cat((rpe0, rpe),1)
         rpe = rpe.reshape(-1, self.num_heads, C // self.num_heads, H_sp * W_sp).permute(0, 1, 3, 2).contiguous()
 
-        x = x.reshape(-1, self.num_heads, C // self.num_heads, self.H_sp* self.W_sp).permute(0, 1, 3, 2).contiguous()
+        x = x.reshape(-1, self.num_heads, C // self.num_heads, self.H_sp * self.W_sp).permute(0, 1, 3, 2).contiguous()
         return x, rpe
 
     def forward(self, temp):
@@ -130,7 +128,6 @@ class LePEAttention(nn.Module):
         """
         B, _, C, H, W = temp.shape
 
-
         idx = self.idx
         if idx == -1:
             H_sp, W_sp = H, W
@@ -139,7 +136,7 @@ class LePEAttention(nn.Module):
         elif idx == 1:
             H_sp, W_sp = self.split_size, W
         else:
-            print ("ERROR MODE in forward", idx)
+            print("ERROR MODE in forward", idx)
             exit(0)
         self.H_sp = H_sp
         self.W_sp = W_sp
@@ -147,16 +144,16 @@ class LePEAttention(nn.Module):
         ### padding for split window
         H_pad = (self.H_sp - H % self.H_sp) % self.H_sp
         W_pad = (self.W_sp - W % self.W_sp) % self.W_sp
-        top_pad = H_pad//2
+        top_pad = H_pad // 2
         down_pad = H_pad - top_pad
-        left_pad = W_pad//2
+        left_pad = W_pad // 2
         right_pad = W_pad - left_pad
         H_ = H + H_pad
         W_ = W + W_pad
 
-        qkv = F.pad(temp, (left_pad, right_pad, top_pad, down_pad)) ### B,3,C,H',W'
+        qkv = F.pad(temp, (left_pad, right_pad, top_pad, down_pad))  ### B,3,C,H',W'
         qkv = qkv.permute(1, 0, 2, 3, 4)
-        q,k,v = qkv[0], qkv[1], qkv[2]
+        q, k, v = qkv[0], qkv[1], qkv[2]
         q = self.im2cswin(q)
         k = self.im2cswin(k)
         v, rpe = self.get_rpe(v, self.get_v, self.get_v1)
@@ -164,27 +161,28 @@ class LePEAttention(nn.Module):
         ### Local attention
         q = q * self.scale
         attn = (q @ k.transpose(-2, -1))  # B head N C @ B head C N --> B head N N
-        
+
         attn = nn.functional.softmax(attn, dim=-1, dtype=attn.dtype)
 
         attn = self.attn_drop(attn)
 
         x = (attn @ v) + rpe
-        x = x.transpose(1, 2).reshape(-1, self.H_sp* self.W_sp, C)  # B head N N @ B head N C
+        x = x.transpose(1, 2).reshape(-1, self.H_sp * self.W_sp, C)  # B head N N @ B head N C
 
         ### Window2Img
-        x = windows2img(x, self.H_sp, self.W_sp, H_, W_) # B H_ W_ C
-        x = x[:, top_pad:H+top_pad, left_pad:W+left_pad, :]
+        x = windows2img(x, self.H_sp, self.W_sp, H_, W_)  # B H_ W_ C
+        x = x[:, top_pad:H + top_pad, left_pad:W + left_pad, :]
         x = x.reshape(B, -1, C)
 
         return x
+
 
 class CSWinBlock(nn.Module):
 
     def __init__(self, dim, patches_resolution, num_heads,
                  split_size=7, mlp_ratio=4., qkv_bias=False, qk_scale=None,
                  drop=0., attn_drop=0., drop_path=0.,
-                 act_layer=nn.GELU, norm_layer=nn.LayerNorm,
+                 act_layer=nn.GELU, norm_cfg=dict(type='LN'),
                  last_stage=False):
         super().__init__()
         self.dim = dim
@@ -193,7 +191,7 @@ class CSWinBlock(nn.Module):
         self.split_size = split_size
         self.mlp_ratio = mlp_ratio
         self.qkv = nn.Linear(dim, dim * 3, bias=True)
-        self.norm1 = norm_layer(dim)
+        self.norm1 = build_norm_layer(norm_cfg, dim)[1]
 
         if last_stage:
             self.branch_num = 1
@@ -201,34 +199,39 @@ class CSWinBlock(nn.Module):
             self.branch_num = 2
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(drop)
-        
+
         if last_stage:
             self.attns = nn.ModuleList([
                 LePEAttention(
-                    dim, resolution=self.patches_resolution, idx = -1,
+                    dim, resolution=self.patches_resolution, idx=-1,
                     split_size=split_size, num_heads=num_heads, dim_out=dim,
                     qkv_bias=qkv_bias, qk_scale=qk_scale,
-                    attn_drop=attn_drop, proj_drop=drop)
-                for i in range(self.branch_num)])
+                    attn_drop=attn_drop, proj_drop=drop
+                )
+                for i in range(self.branch_num)
+            ])
         else:
             self.attns = nn.ModuleList([
                 LePEAttention(
-                    dim//2, resolution=self.patches_resolution, idx = i,
-                    split_size=split_size, num_heads=num_heads//2, dim_out=dim//2,
+                    dim // 2, resolution=self.patches_resolution, idx=i,
+                    split_size=split_size, num_heads=num_heads // 2, dim_out=dim // 2,
                     qkv_bias=qkv_bias, qk_scale=qk_scale,
-                    attn_drop=attn_drop, proj_drop=drop)
-                for i in range(self.branch_num)])
+                    attn_drop=attn_drop, proj_drop=drop
+                )
+                for i in range(self.branch_num)
+            ])
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, out_features=dim, act_layer=act_layer, drop=drop)
-        self.norm2 = norm_layer(dim)
+        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, out_features=dim, act_layer=act_layer,
+                       drop=drop)
+        self.norm2 = build_norm_layer(norm_cfg, dim)[1]
 
-#         num_patch = int((512//(224//patches_resolution))//1.)**2
-#         mlp_hidden_dim = int(dim * mlp_ratio)
-#         mlp_token_dim = int(num_patch * 2)
-#         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-#         self.mlp = Mlp(dim=dim, num_patch = num_patch, channel_dim=mlp_hidden_dim, token_dim=mlp_token_dim, drop=drop)
-#         self.norm2 = norm_layer(dim)
+        #         num_patch = int((512//(224//patches_resolution))//1.)**2
+        #         mlp_hidden_dim = int(dim * mlp_ratio)
+        #         mlp_token_dim = int(num_patch * 2)
+        #         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        #         self.mlp = Mlp(dim=dim, num_patch = num_patch, channel_dim=mlp_hidden_dim, token_dim=mlp_token_dim, drop=drop)
+        #         self.norm2 = norm_layer(dim)
 
         self.H = None
         self.W = None
@@ -236,7 +239,6 @@ class CSWinBlock(nn.Module):
         atten_mask_matrix = None
 
         self.register_buffer("atten_mask_matrix", atten_mask_matrix)
-
 
     def forward(self, x):
         """
@@ -249,34 +251,15 @@ class CSWinBlock(nn.Module):
         img = self.norm1(x)
         temp = self.qkv(img).reshape(B, H, W, 3, C).permute(0, 3, 4, 1, 2)
         if self.branch_num == 2:
-            x1 = self.attns[0](temp[:,:,:C//2,:,:])
-            x2 = self.attns[1](temp[:,:,C//2:,:,:])
-            attened_x = torch.cat([x1,x2], dim=2)
+            x1 = self.attns[0](temp[:, :, :C // 2, :, :])
+            x2 = self.attns[1](temp[:, :, C // 2:, :, :])
+            attened_x = torch.cat([x1, x2], dim=2)
         else:
             attened_x = self.attns[0](temp)
         attened_x = self.proj(attened_x)
         x = x + self.drop_path(self.mlp(self.norm2(x)))
 
         return x
-
-def img2windows(img, H_sp, W_sp):
-    """
-    img: B C H W
-    """
-    B, C, H, W = img.shape
-    img_reshape = img.view(B, C, H // H_sp, H_sp, W // W_sp, W_sp)
-    img_perm = img_reshape.permute(0, 2, 4, 3, 5, 1).contiguous().reshape(-1, H_sp* W_sp, C)
-    return img_perm
-
-def windows2img(img_splits_hw, H_sp, W_sp, H, W):
-    """
-    img_splits_hw: B' H W C
-    """
-    B = int(img_splits_hw.shape[0] / (H * W / H_sp / W_sp))
-
-    img = img_splits_hw.view(B, H // H_sp, W // W_sp, H_sp, W_sp, -1)
-    img = img.permute(0, 1, 3, 2, 4, 5).contiguous().view(B, H, W, -1)
-    return img
 
 
 # class Merge_Block(nn.Module):
@@ -303,84 +286,84 @@ def windows2img(img_splits_hw, H_sp, W_sp, H, W):
 
 # MSRD
 class Merge_Block(nn.Module):
-    def __init__(self, s, dim, dim_out, h, norm_layer=nn.LayerNorm):
+    def __init__(self, s, dim, dim_out, h, norm_cfg=dict(type='LN')):
         super().__init__()
         self.s = s
         assert dim_out % self.s == 0
-#         self.h = 512//(2**((dim//64)+1)) if dim != 256 else 32
+        #         self.h = 512//(2**((dim//64)+1)) if dim != 256 else 32
         self.h = h
-        
+
         self.inconv = nn.Sequential(
             nn.Conv2d(dim, dim_out, 1, 1, 0),
-            nn.LayerNorm([dim_out,self.h,self.h]),
+            nn.LayerNorm([dim_out, self.h, self.h]),
         )
         self.conv = nn.Sequential(
-            nn.Conv2d(dim_out//self.s, dim_out//self.s, 3, 1, 1),
-#             nn.Conv2d(dim_out//4, dim_out//4, 3, 1, 1, groups=dim_out//4),#d
-            nn.LayerNorm([dim_out//self.s,self.h, self.h]),
+            nn.Conv2d(dim_out // self.s, dim_out // self.s, 3, 1, 1),
+            #             nn.Conv2d(dim_out//4, dim_out//4, 3, 1, 1, groups=dim_out//4),#d
+            nn.LayerNorm([dim_out // self.s, self.h, self.h]),
         )
         self.ghconv = nn.Sequential(
-            nn.Conv2d(dim_out//self.s, dim_out//self.s, 1, 1, 0),
-            nn.LayerNorm([dim_out//self.s,self.h,self.h]),
+            nn.Conv2d(dim_out // self.s, dim_out // self.s, 1, 1, 0),
+            nn.LayerNorm([dim_out // self.s, self.h, self.h]),
         )
 
         self.outconv = nn.Sequential(
             nn.Conv2d(dim_out, dim_out, 1, 1, 0),
-#             nn.Conv2d(dim_out, dim_out, 1, 1, 0, groups=dim_out),#e
-            nn.LayerNorm([dim_out,self.h,self.h]),
+            #             nn.Conv2d(dim_out, dim_out, 1, 1, 0, groups=dim_out),#e
+            nn.LayerNorm([dim_out, self.h, self.h]),
         )
         self.pool = nn.MaxPool2d(3, 2, 1)
-        
-        self.norm = norm_layer(dim_out)
-        
+
+        self.norm = build_norm_layer(norm_cfg, dim_out)[1]
 
     def forward(self, x, H, W):
         B, new_HW, C = x.shape
         x = x.transpose(-2, -1).contiguous().view(B, C, H, W)
 
         x = F.gelu(self.inconv(x))
-        
+
         xs = torch.chunk(x, self.s, 1)
         ys = []
         ys.append(xs[0])
-#         ys.append(F.gelu(self.conv(xs[1])))
-#2
-#         ys.append(F.gelu(self.conv(xs[1])+ys[0]))
-#         ys.append(F.gelu(self.conv(xs[2])+xs[1]))
-#         ys.append(F.gelu(self.conv(xs[3])+xs[2]))
-#3        
-#         ys.append(F.gelu(self.conv(xs[1])+ys[0]))
-#         ys.append(F.gelu(self.conv(xs[2])+xs[1]+xs[0]))
-#         ys.append(F.gelu(self.conv(xs[3])+xs[2]+xs[1]+xs[0]))
-#4        
-#         ys.append(F.gelu(self.conv(xs[1])+self.ghconv(ys[0])))
-#         ys.append(F.gelu(self.conv(xs[2])+self.ghconv(xs[1])+self.ghconv(xs[0])))
-#         ys.append(F.gelu(self.conv(xs[3])+self.ghconv(xs[2])+self.ghconv(xs[1])+self.ghconv(xs[0])))
-#1        
-#         ys.append(F.gelu(self.conv(xs[1])+self.ghconv(ys[0])))
-#         ys.append(F.gelu(self.conv(xs[2])+self.ghconv(ys[1])))
-#         ys.append(F.gelu(self.conv(xs[3])+self.ghconv(ys[2])))
-        
-        for i in range(1,self.s):
-            ys.append(F.gelu(self.conv(xs[i])+self.ghconv(ys[i-1])))
-#5        
-#         ys.append(F.gelu(self.conv(xs[1])+self.ghconv(xs[0])))
-#         ys.append(F.gelu(self.conv(xs[2])+self.ghconv(self.conv(xs[1]))+self.ghconv(xs[0])))
-#         ys.append(F.gelu(self.conv(xs[3])+self.ghconv(self.conv(xs[2]))+self.ghconv(self.conv(xs[1]))+self.ghconv(xs[0])))   
-#         ys.append(xs[0])
-#         ys.append(F.gelu(self.conv(xs[1])))
-#         ys.append(F.gelu(self.conv(xs[2]+ys[1])))
-#         ys.append(F.gelu(self.conv(xs[3]+ys[2])))
+        #         ys.append(F.gelu(self.conv(xs[1])))
+        # 2
+        #         ys.append(F.gelu(self.conv(xs[1])+ys[0]))
+        #         ys.append(F.gelu(self.conv(xs[2])+xs[1]))
+        #         ys.append(F.gelu(self.conv(xs[3])+xs[2]))
+        # 3
+        #         ys.append(F.gelu(self.conv(xs[1])+ys[0]))
+        #         ys.append(F.gelu(self.conv(xs[2])+xs[1]+xs[0]))
+        #         ys.append(F.gelu(self.conv(xs[3])+xs[2]+xs[1]+xs[0]))
+        # 4
+        #         ys.append(F.gelu(self.conv(xs[1])+self.ghconv(ys[0])))
+        #         ys.append(F.gelu(self.conv(xs[2])+self.ghconv(xs[1])+self.ghconv(xs[0])))
+        #         ys.append(F.gelu(self.conv(xs[3])+self.ghconv(xs[2])+self.ghconv(xs[1])+self.ghconv(xs[0])))
+        # 1
+        #         ys.append(F.gelu(self.conv(xs[1])+self.ghconv(ys[0])))
+        #         ys.append(F.gelu(self.conv(xs[2])+self.ghconv(ys[1])))
+        #         ys.append(F.gelu(self.conv(xs[3])+self.ghconv(ys[2])))
+
+        for i in range(1, self.s):
+            ys.append(F.gelu(self.conv(xs[i]) + self.ghconv(ys[i - 1])))
+        # 5
+        #         ys.append(F.gelu(self.conv(xs[1])+self.ghconv(xs[0])))
+        #         ys.append(F.gelu(self.conv(xs[2])+self.ghconv(self.conv(xs[1]))+self.ghconv(xs[0])))
+        #         ys.append(F.gelu(self.conv(xs[3])+self.ghconv(self.conv(xs[2]))+self.ghconv(self.conv(xs[1]))+self.ghconv(xs[0])))
+        #         ys.append(xs[0])
+        #         ys.append(F.gelu(self.conv(xs[1])))
+        #         ys.append(F.gelu(self.conv(xs[2]+ys[1])))
+        #         ys.append(F.gelu(self.conv(xs[3]+ys[2])))
         ys = torch.cat(ys, 1)
         ys = self.outconv(ys)
-        x = F.gelu(ys+x)
+        x = F.gelu(ys + x)
         x = self.pool(x)
-#         x = add_avgmax_pool2d(x,(x.shape[2]//2,x.shape[3]//2))
+        #         x = add_avgmax_pool2d(x,(x.shape[2]//2,x.shape[3]//2))
         B, C, H, W = x.shape
         x = x.view(B, C, -1).transpose(-2, -1).contiguous()
         x = self.norm(x)
-        
+
         return x, H, W
+
 
 # class Merge_Block(nn.Module):
 #     def __init__(self, dim, dim_out, H, norm_layer=nn.LayerNorm):
@@ -461,79 +444,103 @@ class Merge_Block(nn.Module):
 
 #         return x, H, W
 
-@BACKBONES.register_module()
-class CSWinTransformer2(nn.Module):
+@MODELS.register_module()
+class CSWinTransformer2(BaseModule):
     """ Vision Transformer with support for patch or hybrid CNN input stage
     """
-    def __init__(self, img_size=224, patch_size=4, in_chans=3, embed_dim=64, depth=[1,2,21,1], split_size = 7, s=[4,4,4],
-                 num_heads=[1,2,4,8], mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
-                 drop_path_rate=0., hybrid_backbone=None, norm_layer=nn.LayerNorm, use_chk=False):
-        super().__init__()
+
+    def __init__(self,
+                 img_size=224,
+                 patch_size=4,
+                 in_channels=3,
+                 embed_dim=64,
+                 depth=(1, 2, 21, 1),
+                 split_size=(1, 2, 5, 5),
+                 s=(4, 4, 4),
+                 num_heads=(1, 2, 4, 8),
+                 mlp_ratio=4.,
+                 qkv_bias=False,
+                 qk_scale=None,
+                 drop_rate=0.,
+                 attn_drop_rate=0.,
+                 drop_path_rate=0.,
+                 hybrid_backbone=None,
+                 norm_cfg=dict(type='LN'),
+                 use_chk=False,
+                 init_cfg=None):
+        super().__init__(init_cfg=init_cfg)
         self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
 
-        heads=num_heads
+        heads = num_heads
         self.use_chk = use_chk
-        self.stage1_conv_embed = nn.Sequential(
-            nn.Conv2d(in_chans, embed_dim, 7, 4, 2),
-#             nn.Conv2d(in_chans, embed_dim, 7, 4, 5, 2),
-            Rearrange('b c h w -> b (h w) c', h = img_size//4, w = img_size//4),
-            nn.LayerNorm(embed_dim)
+        # Overlapping convolutional embeddings
+        # produces patches with (H, W) dimensions divided by 4
+        self.stage1_conv_embed = PatchEmbed(
+            in_channels=in_channels,
+            embed_dims=embed_dim,
+            conv_type='Conv2d',
+            kernel_size=7,
+            stride=4,
+            # in mmseg transformers, padding is now 'corner'
+            padding=2,
+            norm_cfg=norm_cfg, # TODO patch_norm param
+            init_cfg=None
         )
 
-        self.norm1 = nn.LayerNorm(embed_dim)
+        self.norm1 = build_norm_layer(norm_cfg, embed_dim)[1]
 
         curr_dim = embed_dim
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, np.sum(depth))]  # stochastic depth decay rule
         self.stage1 = nn.ModuleList([
             CSWinBlock(
-                dim=curr_dim, num_heads=heads[0], patches_resolution=224//4, mlp_ratio=mlp_ratio,
+                dim=curr_dim, num_heads=heads[0], patches_resolution=224 // 4, mlp_ratio=mlp_ratio,
                 qkv_bias=qkv_bias, qk_scale=qk_scale, split_size=split_size[0],
                 drop=drop_rate, attn_drop=attn_drop_rate,
-                drop_path=dpr[i], norm_layer=norm_layer)
+                drop_path=dpr[i], norm_cfg=norm_cfg)
             for i in range(depth[0])])
-        
-        H1, W1 = img_size//4,img_size//4
-        self.merge1 = Merge_Block(s[0], curr_dim, curr_dim*(heads[1]//heads[0]), H1)
-#         self.merge1 = Merge_Block(curr_dim, curr_dim*(heads[1]//heads[0]), img_size//4)
-        curr_dim = curr_dim*(heads[1]//heads[0])
-        self.norm2 = nn.LayerNorm(curr_dim)
+
+        H1, W1 = img_size // 4, img_size // 4
+        self.merge1 = Merge_Block(s[0], curr_dim, curr_dim * (heads[1] // heads[0]), H1)
+        #         self.merge1 = Merge_Block(curr_dim, curr_dim*(heads[1]//heads[0]), img_size//4)
+        curr_dim = curr_dim * (heads[1] // heads[0])
+        self.norm2 = build_norm_layer(norm_cfg, curr_dim)[1]
         self.stage2 = nn.ModuleList(
             [CSWinBlock(
-                dim=curr_dim, num_heads=heads[1], patches_resolution=224//8, mlp_ratio=mlp_ratio,
+                dim=curr_dim, num_heads=heads[1], patches_resolution=224 // 8, mlp_ratio=mlp_ratio,
                 qkv_bias=qkv_bias, qk_scale=qk_scale, split_size=split_size[1],
                 drop=drop_rate, attn_drop=attn_drop_rate,
-                drop_path=dpr[np.sum(depth[:1])+i], norm_layer=norm_layer)
-            for i in range(depth[1])])
+                drop_path=dpr[np.sum(depth[:1]) + i], norm_cfg=norm_cfg)
+                for i in range(depth[1])])
 
-        H2, W2 = img_size//8,img_size//8
-        self.merge2 = Merge_Block(s[1], curr_dim, curr_dim*(heads[2]//heads[1]), H2)        
-#         self.merge2 = Merge_Block(curr_dim, curr_dim*(heads[2]//heads[1]), img_size//8)
-        curr_dim = curr_dim*(heads[2]//heads[1])
-        self.norm3 = nn.LayerNorm(curr_dim)
+        H2, W2 = img_size // 8, img_size // 8
+        self.merge2 = Merge_Block(s[1], curr_dim, curr_dim * (heads[2] // heads[1]), H2)
+        #         self.merge2 = Merge_Block(curr_dim, curr_dim*(heads[2]//heads[1]), img_size//8)
+        curr_dim = curr_dim * (heads[2] // heads[1])
+        self.norm3 = build_norm_layer(norm_cfg, curr_dim)[1]
         temp_stage3 = []
         temp_stage3.extend(
             [CSWinBlock(
-                dim=curr_dim, num_heads=heads[2], patches_resolution=224//16, mlp_ratio=mlp_ratio,
+                dim=curr_dim, num_heads=heads[2], patches_resolution=224 // 16, mlp_ratio=mlp_ratio,
                 qkv_bias=qkv_bias, qk_scale=qk_scale, split_size=split_size[2],
                 drop=drop_rate, attn_drop=attn_drop_rate,
-                drop_path=dpr[np.sum(depth[:2])+i], norm_layer=norm_layer)
-            for i in range(depth[2])])
+                drop_path=dpr[np.sum(depth[:2]) + i], norm_cfg=norm_cfg)
+                for i in range(depth[2])])
 
         self.stage3 = nn.ModuleList(temp_stage3)
 
-        H3, W3 = img_size//16,img_size//16
-        self.merge3 = Merge_Block(s[2], curr_dim, curr_dim*(heads[3]//heads[2]), H3)
-#         self.merge3 = Merge_Block(curr_dim, curr_dim*(heads[3]//heads[2]), img_size//16)
-        curr_dim = curr_dim*(heads[3]//heads[2])
+        H3, W3 = img_size // 16, img_size // 16
+        self.merge3 = Merge_Block(s[2], curr_dim, curr_dim * (heads[3] // heads[2]), H3)
+        #         self.merge3 = Merge_Block(curr_dim, curr_dim*(heads[3]//heads[2]), img_size//16)
+        curr_dim = curr_dim * (heads[3] // heads[2])
         self.stage4 = nn.ModuleList(
             [CSWinBlock(
-                dim=curr_dim, num_heads=heads[3], patches_resolution=img_size//32, mlp_ratio=mlp_ratio,
+                dim=curr_dim, num_heads=heads[3], patches_resolution=img_size // 32, mlp_ratio=mlp_ratio,
                 qkv_bias=qkv_bias, qk_scale=qk_scale, split_size=split_size[-1],
                 drop=drop_rate, attn_drop=attn_drop_rate,
-                drop_path=dpr[np.sum(depth[:-1])+i], norm_layer=norm_layer, last_stage=True)
-            for i in range(depth[-1])])
-       
-        self.norm4 = norm_layer(curr_dim)
+                drop_path=dpr[np.sum(depth[:-1]) + i], norm_cfg=norm_cfg, last_stage=True)
+                for i in range(depth[-1])])
+
+        self.norm4 = build_norm_layer(norm_cfg, curr_dim)[1]
 
     def init_weights(self):
         def _init_weights(m):
@@ -599,8 +606,8 @@ class CSWinTransformer2(nn.Module):
                 if nH1 != nH2:
                     print_log(f'Error in loading {table_key}, pass')
                 elif L1 != L2:
-                    S1 = int(L1**0.5)
-                    S2 = int(L2**0.5)
+                    S1 = int(L1 ** 0.5)
+                    S2 = int(L2 ** 0.5)
                     table_pretrained_resized = F.interpolate(
                         table_pretrained.permute(1, 0).reshape(1, nH1, S1, S1),
                         size=(S2, S2),
@@ -618,11 +625,7 @@ class CSWinTransformer2(nn.Module):
         return x
 
     def forward_features(self, x):
-        B = x.shape[0]
-        x = self.stage1_conv_embed[0](x) ### B, C, H, W
-        B, C, H, W = x.size()
-        x = x.reshape(B, C, -1).transpose(-1,-2).contiguous()
-        x = self.stage1_conv_embed[2](x)
+        x, (H, W) = self.stage1_conv_embed(x)
 
         out = []
         for blk in self.stage1:
@@ -635,9 +638,9 @@ class CSWinTransformer2(nn.Module):
 
         out.append(self.save_out(x, self.norm1, H, W))
 
-        for pre, blocks, norm in zip([self.merge1, self.merge2, self.merge3], 
+        for pre, blocks, norm in zip([self.merge1, self.merge2, self.merge3],
                                      [self.stage2, self.stage3, self.stage4],
-                                     [self.norm2 , self.norm3 , self.norm4 ]):
+                                     [self.norm2, self.norm3, self.norm4]):
 
             x, H, W = pre(x, H, W)
             for blk in blocks:

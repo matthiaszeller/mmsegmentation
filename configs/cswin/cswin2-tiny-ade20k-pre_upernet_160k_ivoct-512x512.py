@@ -1,5 +1,5 @@
 _base_ = [
-    './cswin2-tiny_upernet_160k_ivoct-512x512.py'
+    './cswin2-tiny_upernet_20k_ivoct-512x512.py'
 ]
 
 model = dict(

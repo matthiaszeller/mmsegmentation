@@ -1,5 +1,6 @@
 # model settings
 norm_cfg = dict(type='SyncBN', requires_grad=True)
+backbone_norm_cfg = dict(type='LN', requires_grad=True)
 data_preprocessor = dict(
     type='SegDataPreProcessor',
     mean=[123.675, 116.28, 103.53],
@@ -24,7 +25,9 @@ model = dict(
         qk_scale=None,
         drop_rate=0.,
         attn_drop_rate=0.,
-        drop_path_rate=0.1),
+        drop_path_rate=0.1,
+        norm_cfg=backbone_norm_cfg,
+    ),
     decode_head=dict(
         type='UPerHead',
         in_channels=[96, 192, 384, 768],
