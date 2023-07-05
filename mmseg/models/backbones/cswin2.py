@@ -10,10 +10,10 @@ from mmcv.cnn import build_norm_layer
 from mmengine.logging import print_log
 from mmengine.model import BaseModule
 from mmengine.runner import CheckpointLoader
-from timm.models.layers import DropPath, trunc_normal_
+from timm.models.layers import trunc_normal_
 
 from mmseg.registry import MODELS
-from .cswin import Mlp, img2windows, windows2img
+from .cswin import img2windows, windows2img, CSWinBlock
 from ..utils import PatchEmbed
 
 
@@ -173,91 +173,6 @@ class LePEAttention(nn.Module):
         x = windows2img(x, self.H_sp, self.W_sp, H_, W_)  # B H_ W_ C
         x = x[:, top_pad:H + top_pad, left_pad:W + left_pad, :]
         x = x.reshape(B, -1, C)
-
-        return x
-
-
-class CSWinBlock(nn.Module):
-
-    def __init__(self, dim, patches_resolution, num_heads,
-                 split_size=7, mlp_ratio=4., qkv_bias=False, qk_scale=None,
-                 drop=0., attn_drop=0., drop_path=0.,
-                 act_layer=nn.GELU, norm_cfg=dict(type='LN'),
-                 last_stage=False):
-        super().__init__()
-        self.dim = dim
-        self.num_heads = num_heads
-        self.patches_resolution = patches_resolution
-        self.split_size = split_size
-        self.mlp_ratio = mlp_ratio
-        self.qkv = nn.Linear(dim, dim * 3, bias=True)
-        self.norm1 = build_norm_layer(norm_cfg, dim)[1]
-
-        if last_stage:
-            self.branch_num = 1
-        else:
-            self.branch_num = 2
-        self.proj = nn.Linear(dim, dim)
-        self.proj_drop = nn.Dropout(drop)
-
-        if last_stage:
-            self.attns = nn.ModuleList([
-                LePEAttention(
-                    dim, resolution=self.patches_resolution, idx=-1,
-                    split_size=split_size, num_heads=num_heads, dim_out=dim,
-                    qkv_bias=qkv_bias, qk_scale=qk_scale,
-                    attn_drop=attn_drop, proj_drop=drop
-                )
-                for i in range(self.branch_num)
-            ])
-        else:
-            self.attns = nn.ModuleList([
-                LePEAttention(
-                    dim // 2, resolution=self.patches_resolution, idx=i,
-                    split_size=split_size, num_heads=num_heads // 2, dim_out=dim // 2,
-                    qkv_bias=qkv_bias, qk_scale=qk_scale,
-                    attn_drop=attn_drop, proj_drop=drop
-                )
-                for i in range(self.branch_num)
-            ])
-        mlp_hidden_dim = int(dim * mlp_ratio)
-        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, out_features=dim, act_layer=act_layer,
-                       drop=drop)
-        self.norm2 = build_norm_layer(norm_cfg, dim)[1]
-
-        #         num_patch = int((512//(224//patches_resolution))//1.)**2
-        #         mlp_hidden_dim = int(dim * mlp_ratio)
-        #         mlp_token_dim = int(num_patch * 2)
-        #         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-        #         self.mlp = Mlp(dim=dim, num_patch = num_patch, channel_dim=mlp_hidden_dim, token_dim=mlp_token_dim, drop=drop)
-        #         self.norm2 = norm_layer(dim)
-
-        self.H = None
-        self.W = None
-
-        atten_mask_matrix = None
-
-        self.register_buffer("atten_mask_matrix", atten_mask_matrix)
-
-    def forward(self, x):
-        """
-        x: B, H*W, C
-        """
-        B, L, C = x.shape
-        H = self.H
-        W = self.W
-        assert L == H * W, "flatten img_tokens has wrong size"
-        img = self.norm1(x)
-        temp = self.qkv(img).reshape(B, H, W, 3, C).permute(0, 3, 4, 1, 2)
-        if self.branch_num == 2:
-            x1 = self.attns[0](temp[:, :, :C // 2, :, :])
-            x2 = self.attns[1](temp[:, :, C // 2:, :, :])
-            attened_x = torch.cat([x1, x2], dim=2)
-        else:
-            attened_x = self.attns[0](temp)
-        attened_x = self.proj(attened_x)
-        x = x + self.drop_path(self.mlp(self.norm2(x)))
 
         return x
 
@@ -658,13 +573,3 @@ class CSWinTransformer2(BaseModule):
     def forward(self, x):
         x = self.forward_features(x)
         return x
-
-
-def _conv_filter(state_dict, patch_size=16):
-    """ convert patch embedding weight from manual patchify + linear proj to conv"""
-    out_dict = {}
-    for k, v in state_dict.items():
-        if 'patch_embed.proj.weight' in k:
-            v = v.reshape((v.shape[0], 3, patch_size, patch_size))
-        out_dict[k] = v
-    return out_dict
