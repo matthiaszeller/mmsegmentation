@@ -1,6 +1,6 @@
 _base_ = [
     '../_base_/models/upernet_cswin2.py', '../_base_/datasets/ivoct.py',
-    '../_base_/default_runtime.py', '../_base_/schedules/schedule_20k.py'
+    '../_base_/default_runtime.py', '../_base_/schedules/schedule_160k.py'
 ]
 crop_size = (512, 512)
 data_preprocessor = dict(size=crop_size)
@@ -38,7 +38,7 @@ optim_wrapper = dict(
             'norm': dict(decay_mult=0.)
         }))
 
-warmup_iters = 180
+warmup_iters = 1500
 param_scheduler = [
     dict(
         type='LinearLR', start_factor=1e-6, by_epoch=False, begin=0, end=warmup_iters),
@@ -47,20 +47,20 @@ param_scheduler = [
         eta_min=0.0,
         power=1.0,
         begin=warmup_iters,
-        end=20000,
+        end=160_000,
         by_epoch=False,
     )
 ]
 
-train_dataloader = dict(batch_size=16)
+train_dataloader = dict(batch_size=2)
 val_dataloader = dict(batch_size=1)
 test_dataloader = val_dataloader
 
 default_hooks = dict(
     # Adjust logging interval
-    logger=dict(interval=20),
+    logger=dict(interval=50),
     # Checkpointing
-    checkpoint=dict(save_best='metric/mIoU', rule='greater', max_keep_ckpts=10, interval=2000),
+    checkpoint=dict(save_best='metric/mIoU', rule='greater', max_keep_ckpts=10, interval=16000),
 )
 # Evaluate more often, takes few seconds only in this config
-train_cfg = dict(val_interval=200)
+train_cfg = dict(val_interval=1500)
