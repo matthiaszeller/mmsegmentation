@@ -17,6 +17,69 @@ from mmseg.registry import TRANSFORMS
 
 
 @TRANSFORMS.register_module()
+class DuplicateImageChannels(BaseTransform):
+    """
+    Duplicate 2D image along channels.
+
+    Required Keys:
+
+    - img
+
+    Modified Keys:
+
+    - img
+
+    Args:
+        num_repeat (int): number of times to repeat image along channel axis. Default: 3
+    """
+
+    def __init__(self, num_repeat: int = 3):
+        self.num_repeat = num_repeat
+
+    def transform(self, results: dict) -> dict:
+        img = results['img']
+        assert img.ndim == 2, f'image should be 2 dimensional, got {img.ndim} dimensions'
+        img = np.repeat(img[None, :, :], self.num_repeat, axis=0)
+        results['img'] = img
+        return results
+
+
+@TRANSFORMS.register_module()
+class RollImage(BaseTransform):
+    """
+    Roll image along axis.
+
+    Required Keys:
+
+    - img
+
+    Modified Keys:
+
+    - img
+
+    Args:
+        axis (int): axis to roll along, advised to use negative indexing for flexibility
+            with grayscale vs colored images. Default: -2
+    """
+
+    def __init__(self, axis: int = -2):
+        self.axis = axis
+
+    def transform(self, results: dict) -> dict:
+        img = results['img']
+
+        num_pixels = np.random.randint(0, img.shape[self.axis])
+        img = np.roll(img, shift=num_pixels, axis=self.axis)
+        results['img'] = img
+        return results
+
+    def __repr__(self):
+        repr_str = self.__class__.__name__
+        repr_str += f'(axis={self.axis})'
+        return repr_str
+
+
+@TRANSFORMS.register_module()
 class ResizeToMultiple(BaseTransform):
     """Resize images & seg to multiple of divisor.
 
