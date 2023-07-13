@@ -47,18 +47,26 @@ class DuplicateImageChannels(BaseTransform):
 @TRANSFORMS.register_module()
 class RandomRoll(BaseTransform):
     """
-    Roll image along axis.
+    Roll image along axis. For an image (C, H, W), axis=-2 will roll along the H axis,
+    i.e., vertically.
 
     Required Keys:
 
     - img
+    - gt_seg_map (optional)
 
     Modified Keys:
 
     - img
+    - gt_seg_map (optional)
+
+    New Keys:
+
+    - roll_axis
+    - roll_pixels
 
     Args:
-        axis (int): axis to roll along, advised to use negative indexing for flexibility
+        axis (int): axis to roll along, use negative indexing for flexibility
             with grayscale vs colored images. Default: -2
     """
 
@@ -71,6 +79,13 @@ class RandomRoll(BaseTransform):
         num_pixels = np.random.randint(0, img.shape[self.axis])
         img = np.roll(img, shift=num_pixels, axis=self.axis)
         results['img'] = img
+
+        results['roll_axis'] = self.axis
+        results['roll_pixels'] = num_pixels
+
+        if results.get('gt_seg_map', None) is not None:
+            results['gt_seg_map'] = np.roll(results['gt_seg_map'], shift=num_pixels, axis=self.axis)
+
         return results
 
     def __repr__(self):
