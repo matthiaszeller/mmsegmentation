@@ -45,7 +45,7 @@ class DuplicateImageChannels(BaseTransform):
 
 
 @TRANSFORMS.register_module()
-class RollImage(BaseTransform):
+class RandomRoll(BaseTransform):
     """
     Roll image along axis.
 
