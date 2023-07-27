@@ -56,3 +56,12 @@ param_scheduler = [
 train_dataloader = dict(batch_size=16)
 val_dataloader = dict(batch_size=1)
 test_dataloader = val_dataloader
+
+default_hooks = dict(
+    # Adjust logging interval
+    logger=dict(interval=20),
+    # Checkpointing
+    checkpoint=dict(save_best='metric/mIoU.calcium', rule='greater', max_keep_ckpts=10),
+)
+# Evaluate more often, takes few seconds only in this config
+train_cfg = dict(val_interval=200)
