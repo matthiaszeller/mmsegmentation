@@ -39,7 +39,7 @@ class DuplicateImageChannels(BaseTransform):
     def transform(self, results: dict) -> dict:
         img = results['img']
         assert img.ndim == 2, f'image should be 2 dimensional, got {img.ndim} dimensions'
-        img = np.repeat(img[None, :, :], self.num_repeat, axis=0)
+        img = np.repeat(img[:, :, None], self.num_repeat, axis=-1)
         results['img'] = img
         return results
 
@@ -47,7 +47,7 @@ class DuplicateImageChannels(BaseTransform):
 @TRANSFORMS.register_module()
 class RandomRoll(BaseTransform):
     """
-    Roll image along axis. For an image (C, H, W), axis=-2 will roll along the H axis,
+    Roll image along axis. For an image (H, W, C), axis=0 will roll along the H axis,
     i.e., vertically.
 
     Required Keys:
@@ -67,10 +67,10 @@ class RandomRoll(BaseTransform):
 
     Args:
         axis (int): axis to roll along, use negative indexing for flexibility
-            with grayscale vs colored images. Default: -2
+            with grayscale vs colored images. Default: 0
     """
 
-    def __init__(self, axis: int = -2):
+    def __init__(self, axis: int = 0):
         self.axis = axis
 
     def transform(self, results: dict) -> dict:
