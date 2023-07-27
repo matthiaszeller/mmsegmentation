@@ -22,6 +22,7 @@ train_pipeline = [
 
 test_pipeline = [
     _load_img,
+    dict(type='DuplicateImageChannels', num_repeat=3),
     dict(type='Resize', scale=(512, 512), keep_ratio=True),
     # add loading annotation after ``Resize`` because ground truth
     # does not need to do resize data transform
