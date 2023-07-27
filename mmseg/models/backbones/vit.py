@@ -1,6 +1,7 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import math
 import warnings
+from collections import OrderedDict
 
 import torch
 import torch.nn as nn
@@ -296,9 +297,17 @@ class VisionTransformer(BaseModule):
                 self.init_cfg['checkpoint'], logger=None, map_location='cpu')
 
             if 'state_dict' in checkpoint:
-                state_dict = checkpoint['state_dict']
+                _state_dict = checkpoint['state_dict']
             else:
-                state_dict = checkpoint
+                _state_dict = checkpoint
+
+            state_dict = OrderedDict()
+            # strip prefix of backbone
+            for k, v in _state_dict.items():
+                if k.startswith('backbone.'):
+                    state_dict[k[9:]] = v
+                else:
+                    state_dict[k] = v
 
             if 'pos_embed' in state_dict.keys():
                 if self.pos_embed.shape != state_dict['pos_embed'].shape:
@@ -312,6 +321,8 @@ class VisionTransformer(BaseModule):
                         state_dict['pos_embed'],
                         (h // self.patch_size, w // self.patch_size),
                         (pos_size, pos_size), self.interpolate_mode)
+                else:
+                    print_log('Keep the pos_embed shape')
 
             load_state_dict(self, state_dict, strict=False, logger=None)
         elif self.init_cfg is not None:
