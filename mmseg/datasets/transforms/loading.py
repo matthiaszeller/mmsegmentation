@@ -1,6 +1,8 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import warnings
 from typing import Dict, Optional, Union
+from zipfile import ZipFile
+from pathlib import Path
 
 import mmcv
 import mmengine.fileio as fileio
@@ -11,6 +13,77 @@ from mmcv.transforms import LoadImageFromFile
 
 from mmseg.registry import TRANSFORMS
 from mmseg.utils import datafrombytes
+
+
+@TRANSFORMS.register_module()
+class LoadImageFromZipFile(LoadImageFromFile):
+    """Load an image from a zipfile.
+
+    Required Keys:
+
+    - zip_path
+    - img_path
+
+    Modified Keys:
+
+    - img
+    - img_shape
+    - ori_shape
+
+    Args:
+        color_type (str): The flag argument for :func:`mmcv.imfrombytes`.
+            Defaults to 'color'.
+        imdecode_backend (str): The image decoding backend type. The backend
+            argument for :func:`mmcv.imfrombytes`.
+            See :func:`mmcv.imfrombytes` for details.
+            Defaults to 'cv2'.
+        stack_adjacent_frames (int): Experimental. Stack adjacent frames together as a single image. Defaults to None.
+            For a positive number, the total number of channels will be (2*stack_adjacent_frames + 1) * C.
+            If not None, need `basename` key.
+    """
+
+    def __init__(self,
+                 color_type: str = 'color',
+                 imdecode_backend: str = 'cv2',
+                 stack_adjacent_frames: Optional[int] = None):
+        self.color_type = color_type
+        self.imdecode_backend = imdecode_backend
+
+        assert stack_adjacent_frames is None or stack_adjacent_frames > 0
+        self.stack_adjacent_frames = stack_adjacent_frames
+
+    def _read_frame(self, zf: ZipFile, img_path: str):
+        img_bytes = zf.read(img_path)
+        img = mmcv.imfrombytes(
+            img_bytes, flag=self.color_type, backend=self.imdecode_backend
+        )
+        return img
+
+    def transform(self, results: dict) -> dict:
+        """Method to load image from zipfile."""
+        with ZipFile(results['zip_path']) as zf:
+            img_path = results['img_path']
+
+            if self.stack_adjacent_frames is None:
+                img = self._read_frame(zf, img_path)
+
+            elif self.stack_adjacent_frames is not None:
+                basename, slicenum = Path(img_path).stem.rsplit('_', 1)
+                slicenum = int(slicenum)
+                load_slices = range(slicenum - self.stack_adjacent_frames, slicenum + self.stack_adjacent_frames + 1)
+                imgs = [
+                    self._read_frame(zf, str(Path(f'{basename}_{i}').with_suffix('.png')))
+                    for i in load_slices
+                ]
+                if imgs[0].ndim == 2:
+                    img = np.stack(imgs, axis=-1)
+                else:
+                    img = np.concatenate(imgs, axis=-1)
+
+        results['img'] = img
+        results['img_shape'] = img.shape
+        results['ori_shape'] = img.shape
+        return results
 
 
 @TRANSFORMS.register_module()
