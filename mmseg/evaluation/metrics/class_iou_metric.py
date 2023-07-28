@@ -50,6 +50,7 @@ class ClassIoUMetric(IoUMetric):
                  output_dir: Optional[str] = None,
                  format_only: bool = False,
                  prefix: Optional[str] = None,
+                 print_results: bool = True,
                  **kwargs) -> None:
         super().__init__(collect_device=collect_device, prefix=prefix)
 
@@ -61,6 +62,7 @@ class ClassIoUMetric(IoUMetric):
         if self.output_dir and is_main_process():
             mkdir_or_exist(self.output_dir)
         self.format_only = format_only
+        self.print_results = print_results
 
     def compute_metrics(self, results: list) -> Dict[str, float]:
         """Compute the metrics from processed results.
@@ -118,8 +120,9 @@ class ClassIoUMetric(IoUMetric):
         for key, val in ret_metrics_class.items():
             class_table_data.add_column(key, val)
 
-        print_log('per class results:', logger)
-        print_log('\n' + class_table_data.get_string(), logger=logger)
+        if self.print_results:
+            print_log('per class results:', logger)
+            print_log('\n' + class_table_data.get_string(), logger=logger)
 
         metrics.update(self._get_class_metrics(class_table_data))
         return metrics

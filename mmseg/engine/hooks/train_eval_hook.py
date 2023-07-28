@@ -23,6 +23,11 @@ class TrainEvalHook(Hook):
 
     def before_train(self, runner: Runner) -> None:
         self.evaluator = deepcopy(runner.val_evaluator)
+        for m in self.evaluator.metrics:
+            m.prefix = 'train_' + m.prefix
+
+            if hasattr(m, 'print_results'):
+                m.print_results = False
 
     def after_train_iter(self,
                          runner: Runner,
@@ -38,7 +43,6 @@ class TrainEvalHook(Hook):
                 self.run_iter(runner, batch)
 
             metrics = self.evaluator.evaluate(len(data_batch['inputs']))
-            metrics['iter'] = runner.iter
             self.write_metrics(runner, metrics)
 
             runner.model.train()
@@ -49,7 +53,8 @@ class TrainEvalHook(Hook):
         self.evaluator.process(data_samples=outputs, data_batch=data_batch)
 
     def write_metrics(self, runner: Runner, metrics: dict):
-        logdir = Path(runner.log_dir).joinpath('train_metrics.json')
-        with logdir.open('a') as fh:
-            buffer = json.dumps(metrics)
-            fh.write(buffer + '\n')
+        runner.visualizer.add_scalars(metrics, runner.iter + 1)
+        # logdir = Path(runner.log_dir).joinpath('train_metrics.json')
+        # with logdir.open('a') as fh:
+        #     buffer = json.dumps(metrics)
+        #     fh.write(buffer + '\n')
