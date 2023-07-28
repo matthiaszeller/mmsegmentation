@@ -36,7 +36,7 @@ class IVOCTDataset(BaseSegDataset):
 
 
 @DATASETS.register_module()
-class IVOCTZipDataset(BaseSegDataset):
+class IVOCTZipDataset(IVOCTDataset):
     """
     IVOCT dataset reading images from zip file, associated loader: ReadImageFromZipFile.
     Annotation file can contain additional info, in the form of key=value pairs, e.g.:

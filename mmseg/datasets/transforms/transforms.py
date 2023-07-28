@@ -43,6 +43,11 @@ class DuplicateImageChannels(BaseTransform):
         results['img'] = img
         return results
 
+    def __repr__(self):
+        repr_str = self.__class__.__name__
+        repr_str += f'(num_repeat={self.num_repeat})'
+        return repr_str
+
 
 @TRANSFORMS.register_module()
 class RandomRoll(BaseTransform):

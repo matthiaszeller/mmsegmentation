@@ -85,6 +85,18 @@ class LoadImageFromZipFile(LoadImageFromFile):
         results['ori_shape'] = img.shape
         return results
 
+    def __repr__(self):
+        repr_str = (f'{self.__class__.__name__}('
+                    f"color_type='{self.color_type}', "
+                    f"imdecode_backend='{self.imdecode_backend}', ")
+
+        if self.stack_adjacent_frames is not None:
+            repr_str += f'stack_adjacent_frames={self.stack_adjacent_frames})'
+        else:
+            repr_str += ')'
+
+        return repr_str
+
 
 @TRANSFORMS.register_module()
 class LoadAnnotations(MMCV_LoadAnnotations):

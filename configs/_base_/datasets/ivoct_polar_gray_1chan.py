@@ -4,8 +4,8 @@ _base_ = [
 
 crop_size = (512, 512)
 
-# images are PNG in palette mode, by default the colormap will be applied
-_load_img = dict(type='LoadImageFromFile', imdecode_backend='pillow', color_type='unchanged')
+# images are PNG in palette mode, by default mmcv.imgfrombytes will apply colormap
+_load_img = dict(type='LoadImageFromZipFile', imdecode_backend='pillow', color_type='unchanged')
 
 train_pipeline = [
     _load_img,

@@ -1,12 +1,12 @@
 # dataset settings
-dataset_type = 'IVOCTDataset'
-data_root = 'data/shockwave/dataset-rgb'
+dataset_type = 'IVOCTZipDataset'
+data_root = 'data/shockwave'
 
 crop_size = (512, 512)
 
 train_pipeline = [
-    # note: loading relies on mmcv.frombytes, which has BGR and not RGB
-    dict(type='LoadImageFromFile'),
+    # images are PNG in palette mode, by default mmcv.imgfrombytes will apply colormap
+    dict(type='LoadImageFromZipFile'),
     dict(type='LoadAnnotations'),
     dict(type='Resize', scale=(512, 512), keep_ratio=True),
     #dict(type='RandomResize', scale=(512, 512), ratio_range=(0.5, 2.0), keep_ratio=True),
@@ -17,7 +17,8 @@ train_pipeline = [
 ]
 
 test_pipeline = [
-    dict(type='LoadImageFromFile'),
+    # images are PNG in palette mode, by default mmcv.imgfrombytes will apply colormap
+    dict(type='LoadImageFromZipFile'),
     dict(type='Resize', scale=(512, 512), keep_ratio=True),
     # add loading annotation after ``Resize`` because ground truth
     # does not need to do resize data transform
@@ -37,7 +38,7 @@ train_dataloader = dict(
     dataset=dict(
         type=dataset_type,
         data_root=data_root,
-        data_prefix=dict(img_path='images', seg_map_path='labels'),
+        data_prefix=dict(img_path='images-3D-cartesian', seg_map_path='labels/cartesian'),
         ann_file='splits/segmentation/train.txt',
         pipeline=train_pipeline
     )
@@ -51,7 +52,7 @@ val_dataloader = dict(
     dataset=dict(
         type=dataset_type,
         data_root=data_root,
-        data_prefix=dict(img_path='images', seg_map_path='labels'),
+        data_prefix=dict(img_path='images-3D-cartesian', seg_map_path='labels/cartesian'),
         ann_file='splits/segmentation/val.txt',
         pipeline=test_pipeline
     )
