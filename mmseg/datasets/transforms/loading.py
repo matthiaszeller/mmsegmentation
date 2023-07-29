@@ -81,8 +81,8 @@ class LoadImageFromZipFile(LoadImageFromFile):
                     img = np.concatenate(imgs, axis=-1)
 
         results['img'] = img
-        results['img_shape'] = img.shape
-        results['ori_shape'] = img.shape
+        results['img_shape'] = img.shape[:2]
+        results['ori_shape'] = img.shape[:2]
         return results
 
     def __repr__(self):
