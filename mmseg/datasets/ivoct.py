@@ -30,6 +30,7 @@ class IVOCTDataset(BaseSegDataset):
             img_suffix=img_suffix,
             seg_map_suffix=seg_map_suffix,
             ann_file=ann_file,
+            reduce_zero_label=True,
             **kwargs)
         assert fileio.exists(self.data_prefix['img_path'],
                              self.backend_args) and osp.isfile(self.ann_file)
@@ -39,6 +40,8 @@ class IVOCTDataset(BaseSegDataset):
 class IVOCTZipDataset(IVOCTDataset):
     """
     IVOCT dataset reading images from zip file, associated loader: ReadImageFromZipFile.
+    Annotation file can contain several frame numbers, e.g. patient_pre_1_2_3, patient_pre_23_24_24,
+    the basename should not contain underscores.
     Annotation file can contain additional info, in the form of key=value pairs, e.g.:
 
     0001_1.png group=1 otherkey=othervalue
@@ -52,16 +55,28 @@ class IVOCTZipDataset(IVOCTDataset):
                  ann_file,
                  img_suffix='.png',
                  seg_map_suffix='.png',
+                 enable_3d: bool = False,
                  **kwargs) -> None:
 
+        self.enable_3d = enable_3d
         super().__init__(
             ann_file=ann_file,
             data_root=data_root,
             img_suffix=img_suffix,
             seg_map_suffix=seg_map_suffix,
+            reduce_zero_label=True,
             **kwargs)
 
     def load_data_list(self) -> list[dict]:
+        def get_frame_path(basename, slicenums, suffix):
+            paths = tuple([
+                str(Path(f'{basename}_{n}').with_suffix(suffix))
+                for n in slicenums
+            ])
+            if len(paths) == 1:
+                return paths[0]
+            return paths
+
         data_list = []
         lines = mmengine.list_from_file(self.ann_file, backend_args=self.backend_args)
 
@@ -72,22 +87,26 @@ class IVOCTZipDataset(IVOCTDataset):
             img_name, *dicstr = line.split(' ')
             dic = dict([kv.split('=') for kv in dicstr])
 
-            basename, slicenum = img_name.split('_')
-            slicenum = int(slicenum)
+            basename, *slicenums = img_name.split('_')
+            slicenums = list(map(int, slicenums))
+            if self.enable_3d:
+                assert len(slicenums) > 1, f'3D mode requires at least 2 slices, got {slicenums}'
+            else:
+                assert len(slicenums) == 1, f'2D mode requires exactly 1 slice, got {slicenums}'
 
             zip_path = img_dir.joinpath(basename).with_suffix('.zip')
-            img_path = Path(img_name).with_suffix(self.img_suffix)
-            seg_map = ann_dir.joinpath(img_name).with_suffix(self.seg_map_suffix)
+            img_path = get_frame_path(basename, slicenums, self.img_suffix)
+            seg_map = get_frame_path(ann_dir.joinpath(basename), slicenums, self.seg_map_suffix)
 
             data_info = dict(
-                img_path=str(img_path),
+                img_path=img_path,
                 zip_path=str(zip_path),
-                seg_map_path=str(seg_map),
+                seg_map_path=seg_map,
                 label_map=self.label_map,
                 reduce_zero_label=self.reduce_zero_label,
                 seg_fields=[],
                 basename=basename,
-                slicenum=slicenum,
+                slicenum=slicenums,
                 **dic
             )
             data_list.append(data_info)

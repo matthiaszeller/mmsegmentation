@@ -10,7 +10,7 @@ _load_img = dict(type='LoadImageFromZipFile', imdecode_backend='pillow', color_t
 train_pipeline = [
     _load_img,
     dict(type='DuplicateImageChannels', num_repeat=3),
-    dict(type='LoadAnnotations'),
+    dict(type='LoadAnnotations', reduce_zero_label=True),
     dict(type='Resize', scale=(512, 512), keep_ratio=True),
     #dict(type='RandomResize', scale=(512, 512), ratio_range=(0.5, 2.0), keep_ratio=True),
     #dict(type='RandomCrop', crop_size=crop_size, cat_max_ratio=0.75),
@@ -26,7 +26,7 @@ test_pipeline = [
     dict(type='Resize', scale=(512, 512), keep_ratio=True),
     # add loading annotation after ``Resize`` because ground truth
     # does not need to do resize data transform
-    dict(type='LoadAnnotations'),
+    dict(type='LoadAnnotations', reduce_zero_label=True),
     dict(type='PackSegInputs')
 ]
 

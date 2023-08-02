@@ -7,7 +7,7 @@ crop_size = (512, 512)
 train_pipeline = [
     # images are PNG in palette mode, by default mmcv.imgfrombytes will apply colormap
     dict(type='LoadImageFromZipFile'),
-    dict(type='LoadAnnotations'),
+    dict(type='LoadAnnotations', reduce_zero_label=True),
     dict(type='Resize', scale=(512, 512), keep_ratio=True),
     #dict(type='RandomResize', scale=(512, 512), ratio_range=(0.5, 2.0), keep_ratio=True),
     #dict(type='RandomCrop', crop_size=crop_size, cat_max_ratio=0.75),
@@ -22,7 +22,7 @@ test_pipeline = [
     dict(type='Resize', scale=(512, 512), keep_ratio=True),
     # add loading annotation after ``Resize`` because ground truth
     # does not need to do resize data transform
-    dict(type='LoadAnnotations'),
+    dict(type='LoadAnnotations', reduce_zero_label=True),
     dict(type='PackSegInputs')
 ]
 
@@ -41,7 +41,6 @@ train_dataloader = dict(
         data_prefix=dict(img_path='images-3D-cartesian', seg_map_path='labels/cartesian'),
         ann_file='splits/segmentation/train.txt',
         pipeline=train_pipeline,
-        reduce_zero_label=True,
     )
 )
 
@@ -56,7 +55,6 @@ val_dataloader = dict(
         data_prefix=dict(img_path='images-3D-cartesian', seg_map_path='labels/cartesian'),
         ann_file='splits/segmentation/val.txt',
         pipeline=test_pipeline,
-        reduce_zero_label=True,
     )
 )
 
