@@ -40,7 +40,8 @@ train_dataloader = dict(
         data_root=data_root,
         data_prefix=dict(img_path='images-3D-cartesian', seg_map_path='labels/cartesian'),
         ann_file='splits/segmentation/train.txt',
-        pipeline=train_pipeline
+        pipeline=train_pipeline,
+        reduce_zero_label=True,
     )
 )
 
@@ -54,7 +55,8 @@ val_dataloader = dict(
         data_root=data_root,
         data_prefix=dict(img_path='images-3D-cartesian', seg_map_path='labels/cartesian'),
         ann_file='splits/segmentation/val.txt',
-        pipeline=test_pipeline
+        pipeline=test_pipeline,
+        reduce_zero_label=True,
     )
 )
 
