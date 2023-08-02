@@ -1,6 +1,6 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import warnings
-from typing import Dict, Optional, Union
+from typing import Dict, Optional, Union, Iterable
 from zipfile import ZipFile
 from pathlib import Path
 
@@ -45,14 +45,26 @@ class LoadImageFromZipFile(LoadImageFromFile):
     def __init__(self,
                  color_type: str = 'color',
                  imdecode_backend: str = 'cv2',
-                 stack_adjacent_frames: Optional[int] = None):
+                 stack_adjacent_frames: Optional[int] = None,
+                 enable_3d: bool = False) -> None:
         self.color_type = color_type
         self.imdecode_backend = imdecode_backend
 
         assert stack_adjacent_frames is None or stack_adjacent_frames > 0
         self.stack_adjacent_frames = stack_adjacent_frames
 
+        self.enable_3d = enable_3d
+
     def _read_frame(self, zf: ZipFile, img_path: str):
+        if not isinstance(img_path, str) and isinstance(img_path, Iterable):
+            assert self.enable_3d, 'enable_3d must be True to load multiple frames'
+            imgs = [self._read_frame(zf, p) for p in img_path]
+            if imgs[0].ndim == 2:
+                img = np.stack(imgs, axis=-1)
+            else:
+                img = np.concatenate(imgs, axis=-1)
+            return img
+
         img_bytes = zf.read(img_path)
         img = mmcv.imfrombytes(
             img_bytes, flag=self.color_type, backend=self.imdecode_backend
@@ -143,6 +155,7 @@ class LoadAnnotations(MMCV_LoadAnnotations):
             See https://mmengine.readthedocs.io/en/latest/api/fileio.htm
             for details. Defaults to None.
             Notes: mmcv>=2.0.0rc4, mmengine>=0.2.0 required.
+        enable_3d (bool): Experimental. Whether to load 3D segmentation map. Defaults to False.
     """
 
     def __init__(
@@ -150,6 +163,7 @@ class LoadAnnotations(MMCV_LoadAnnotations):
         reduce_zero_label=None,
         backend_args=None,
         imdecode_backend='pillow',
+        enable_3d=False,
     ) -> None:
         super().__init__(
             with_bbox=False,
@@ -157,7 +171,8 @@ class LoadAnnotations(MMCV_LoadAnnotations):
             with_seg=True,
             with_keypoints=False,
             imdecode_backend=imdecode_backend,
-            backend_args=backend_args)
+            backend_args=backend_args,
+        )
         self.reduce_zero_label = reduce_zero_label
         if self.reduce_zero_label is not None:
             warnings.warn('`reduce_zero_label` will be deprecated, '
@@ -165,6 +180,14 @@ class LoadAnnotations(MMCV_LoadAnnotations):
                           'set `reduce_zero_label=True` when dataset '
                           'initialized')
         self.imdecode_backend = imdecode_backend
+        self.enable_3d = enable_3d
+
+    def _load_seg_map_file(self, path):
+        img_bytes = fileio.get(path, backend_args=self.backend_args)
+        gt_semantic_seg = mmcv.imfrombytes(
+            img_bytes, flag='unchanged',
+            backend=self.imdecode_backend).squeeze().astype(np.uint8)
+        return gt_semantic_seg
 
     def _load_seg_map(self, results: dict) -> None:
         """Private function to load semantic segmentation annotations.
@@ -176,11 +199,14 @@ class LoadAnnotations(MMCV_LoadAnnotations):
             dict: The dict contains loaded semantic segmentation annotations.
         """
 
-        img_bytes = fileio.get(
-            results['seg_map_path'], backend_args=self.backend_args)
-        gt_semantic_seg = mmcv.imfrombytes(
-            img_bytes, flag='unchanged',
-            backend=self.imdecode_backend).squeeze().astype(np.uint8)
+        if isinstance(results['seg_map_path'], (list, tuple)):
+            assert self.enable_3d, '3D segmentation map is not enabled'
+            gt_semantic_seg = np.stack([
+                self._load_seg_map_file(seg_map_path)
+                for seg_map_path in results['seg_map_path']
+            ])
+        else:
+            gt_semantic_seg = self._load_seg_map_file(results['seg_map_path'])
 
         # reduce zero_label
         if self.reduce_zero_label is None:

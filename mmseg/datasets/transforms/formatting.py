@@ -44,8 +44,10 @@ class PackSegInputs(BaseTransform):
     def __init__(self,
                  meta_keys=('img_path', 'seg_map_path', 'ori_shape',
                             'img_shape', 'pad_shape', 'scale_factor', 'flip',
-                            'flip_direction', 'reduce_zero_label')):
+                            'flip_direction', 'reduce_zero_label'),
+                 enable_3d: bool = False):
         self.meta_keys = meta_keys
+        self.enable_3d = enable_3d
 
     def transform(self, results: dict) -> dict:
         """Method to pack the input data.
@@ -78,10 +80,15 @@ class PackSegInputs(BaseTransform):
                 data = to_tensor(results['gt_seg_map'][None,
                                                        ...].astype(np.int64))
             else:
-                warnings.warn('Please pay attention your ground truth '
-                              'segmentation map, usually the segmentation '
-                              'map is 2D, but got '
-                              f'{results["gt_seg_map"].shape}')
+                if self.enable_3d and len(results['gt_seg_map'].shape) != 3:
+                    warnings.warn('Please pay attention your ground truth '
+                                  'segmentation map, expected 3D, but got '
+                                  f'{results["gt_seg_map"].shape}')
+                elif len(results['gt_seg_map'].shape) != 2:
+                    warnings.warn('Please pay attention your ground truth '
+                                  'segmentation map, usually the segmentation '
+                                  'map is 2D, but got '
+                                  f'{results["gt_seg_map"].shape}')
                 data = to_tensor(results['gt_seg_map'].astype(np.int64))
             gt_sem_seg_data = dict(data=data)
             data_sample.gt_sem_seg = PixelData(**gt_sem_seg_data)
@@ -103,5 +110,5 @@ class PackSegInputs(BaseTransform):
 
     def __repr__(self) -> str:
         repr_str = self.__class__.__name__
-        repr_str += f'(meta_keys={self.meta_keys})'
+        repr_str += f'(meta_keys={self.meta_keys}, enable_3d={self.enable_3d})'
         return repr_str
