@@ -26,7 +26,7 @@ class IVOCTDataset(BaseSegDataset):
                  img_suffix='.png',
                  seg_map_suffix='.png',
                  **kwargs) -> None:
-        kwargs['reduce_zero_label'] = True
+        #kwargs['reduce_zero_label'] = True
         super().__init__(
             img_suffix=img_suffix,
             seg_map_suffix=seg_map_suffix,
@@ -58,7 +58,7 @@ class IVOCTZipDataset(IVOCTDataset):
                  enable_3d: bool = False,
                  **kwargs) -> None:
 
-        kwargs['reduce_zero_label'] = True
+        #kwargs['reduce_zero_label'] = True
         self.enable_3d = enable_3d
         super().__init__(
             ann_file=ann_file,
