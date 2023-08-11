@@ -20,5 +20,5 @@ tta_model = dict(type='SegTTAModel')
 
 custom_hooks = [
     dict(type='DataSplitHook', priority='VERY_LOW'),
-    dict(type='TrainEvalHook', priority='LOW', interval=50),
+#    dict(type='TrainEvalHook', priority='LOW', interval=50),
 ]
