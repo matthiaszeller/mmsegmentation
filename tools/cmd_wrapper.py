@@ -58,12 +58,13 @@ def gen_cmd_sbatch(script: str, config, jobname: str = None, split_train: str = 
         cfg_options.append(f'val_dataloader.dataset.ann_file={split_val}')
         cfg_options.append(f'test_dataloader.dataset.ann_file={split_val}')
 
+    if work_dir is not None:
+        cfg_options.append(f'work-dir={work_dir}')
+
     if cfg_options:
         cmd.append('--cfg-options')
         cmd.extend(cfg_options)
 
-    if work_dir is not None:
-        cmd.append(f'--work-dir={work_dir}')
 
     return ' '.join(cmd)
 
