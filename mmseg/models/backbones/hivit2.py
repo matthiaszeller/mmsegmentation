@@ -372,74 +372,97 @@ class HiViT2(BaseHiViT):
         self.apply(self._init_weights)
 
         if self.init_cfg is None:
-            pass
+            return
+
+        assert 'checkpoint' in self.init_cfg, f'Only support ' \
+                                              f'specify `Pretrained` in ' \
+                                              f'`init_cfg` in ' \
+                                              f'{self.__class__.__name__} '
+
+        logger = 'current'
+        checkpoint = CheckpointLoader.load_checkpoint(
+            self.init_cfg['checkpoint'], map_location='cpu', logger=logger
+        )
+
+        # get state_dict from checkpoint
+        if 'state_dict' in checkpoint:
+            state_dict = checkpoint['state_dict']
+        elif 'model' in checkpoint:
+            state_dict = checkpoint['model']
+        elif 'module' in checkpoint:
+            state_dict = checkpoint['module']
         else:
-            assert 'checkpoint' in self.init_cfg, f'Only support ' \
-                                                  f'specify `Pretrained` in ' \
-                                                  f'`init_cfg` in ' \
-                                                  f'{self.__class__.__name__} '
+            state_dict = checkpoint
+        # strip prefix of state_dict
+        if list(state_dict.keys())[0].startswith('module.'):
+            state_dict = {k[7:]: v for k, v in state_dict.items()}
 
-            logger = 'current'
-            checkpoint = CheckpointLoader.load_checkpoint(
-                self.init_cfg['checkpoint'], map_location='cpu', logger=logger
-            )
+        # for MoBY, load model of online branch
+        if any([k.startswith('encoder') for k in state_dict.keys()]):
+            print_log('Remove the prefix of "encoder."', logger)
+            state_dict = {k.replace('encoder.', ''): v for k, v in state_dict.items() if k.startswith('encoder.')}
 
-            # get state_dict from checkpoint
-            if 'state_dict' in checkpoint:
-                state_dict = checkpoint['state_dict']
-            elif 'model' in checkpoint:
-                state_dict = checkpoint['model']
-            elif 'module' in checkpoint:
-                state_dict = checkpoint['module']
+        if any([k.startswith('backbone') for k in state_dict.keys()]):
+            print_log('Remove the prefix of "backbone."', logger)
+            state_dict = {k.replace('backbone.', ''): v for k, v in state_dict.items() if k.startswith('backbone.')}
+
+        if "rel_pos_bias.relative_position_bias_table" in state_dict.keys():
+            print_log("Expand the shared relative position embedding to each transformer block. ", logger)
+            num_layers = self.get_num_layers()
+            rel_pos_bias = state_dict["rel_pos_bias.relative_position_bias_table"]
+            for i in range(num_layers):
+                state_dict["blocks.%d.attn.relative_position_bias_table" % i] = rel_pos_bias.clone()
+
+        # reshape absolute position embedding for Swin
+        if state_dict.get('absolute_pos_embed') is not None:
+            absolute_pos_embed = state_dict['absolute_pos_embed']
+            N1, L, C1 = absolute_pos_embed.size()
+            N2, L2, C2 = self.absolute_pos_embed.size()
+            if N1 != N2 or C1 != C2 or L != L2:
+                # TODO implement interpolation
+                print_log("Error in loading absolute_pos_embed, pass, TODO IMPLEMENT", logger, level=logging.ERROR)
             else:
-                state_dict = checkpoint
-            # strip prefix of state_dict
-            if list(state_dict.keys())[0].startswith('module.'):
-                state_dict = {k[7:]: v for k, v in state_dict.items()}
+                state_dict['absolute_pos_embed'] = absolute_pos_embed
 
-            # for MoBY, load model of online branch
-            if any([k.startswith('encoder') for k in state_dict.keys()]):
-                print_log('Remove the prefix of "encoder."', logger)
-                state_dict = {k.replace('encoder.', ''): v for k, v in state_dict.items() if k.startswith('encoder.')}
+        # interpolate position bias table if needed
+        rpe_interpolation = 'geo'
+        relative_position_bias_table_keys = [k for k in state_dict.keys() if "relative_position_bias_table" in k]
 
-            if "rel_pos_bias.relative_position_bias_table" in state_dict.keys():
-                print_log("Expand the shared relative position embedding to each transformer block. ", logger)
-                num_layers = self.get_num_layers()
-                rel_pos_bias = state_dict["rel_pos_bias.relative_position_bias_table"]
-                for i in range(num_layers):
-                    state_dict["blocks.%d.attn.relative_position_bias_table" % i] = rel_pos_bias.clone()
+        for k in relative_position_bias_table_keys:
+            table_pretrained = state_dict[k]
+            table_current = self.state_dict()[k]
+            L1, nH1 = table_pretrained.size()
+            L2, nH2 = table_current.size()
+            if nH1 != nH2:
+                print_log(f"Error in loading {k}, pass", logger, level=logging.WARNING)
+            else:
+                if L1 != L2:
+                    if rpe_interpolation in ['bicubic', 'bilinear', 'nearest']:
+                        print_log(f"Interpolate relative_position_bias_table using {rpe_interpolation}", logger)
+                        S1 = int(L1 ** 0.5)
+                        S2 = int(L2 ** 0.5)
+                        table_pretrained_resized = F.interpolate(
+                            table_pretrained.permute(1, 0).view(1, nH1, S1, S1),
+                            size=(S2, S2), mode=rpe_interpolation)
+                        state_dict[k] = table_pretrained_resized.view(nH2, L2).permute(1, 0)
+                    elif rpe_interpolation == 'outer_mask':
+                        print_log("Interpolate relative_position_bias_table using outer mask.", logger)
+                        S1 = int(L1 ** 0.5)
+                        S2 = int(L2 ** 0.5)
+                        pad_size = (S2 - S1) // 2
+                        padding = (pad_size, pad_size, pad_size, pad_size)
 
-            # reshape absolute position embedding for Swin
-            if state_dict.get('absolute_pos_embed') is not None:
-                absolute_pos_embed = state_dict['absolute_pos_embed']
-                N1, L, C1 = absolute_pos_embed.size()
-                N2, L2, C2 = self.absolute_pos_embed.size()
-                if N1 != N2 or C1 != C2 or L != L2:
-                    # TODO implement interpolation
-                    print_log("Error in loading absolute_pos_embed, pass, TODO IMPLEMENT", logger, level=logging.ERROR)
-                else:
-                    state_dict['absolute_pos_embed'] = absolute_pos_embed
-
-            all_keys = list(self.state_dict().keys())
-            for key in all_keys:
-                if "relative_position_bias_table" in key:
-                    if key not in state_dict.keys():
-                        continue
-
-                    rel_pos_bias = state_dict[key]
-                    src_num_pos, num_attn_heads = rel_pos_bias.size()
-                    dst_num_pos, _ = self.state_dict()[key].size()
-                    dst_patch_shape = self.patch_embed.patch_shape
-                    if dst_patch_shape[0] != dst_patch_shape[1]:
-                        raise NotImplementedError()
-                    num_extra_tokens = dst_num_pos - (dst_patch_shape[0] * 2 - 1) * (dst_patch_shape[1] * 2 - 1)
-                    src_size = int((src_num_pos - num_extra_tokens) ** 0.5)
-                    dst_size = int((dst_num_pos - num_extra_tokens) ** 0.5)
-                    if src_size != dst_size:
-                        print_log("Position interpolate for %s from %dx%d to %dx%d" % (
-                            key, src_size, src_size, dst_size, dst_size), logger)
-                        extra_tokens = rel_pos_bias[-num_extra_tokens:, :]
-                        rel_pos_bias = rel_pos_bias[:-num_extra_tokens, :]
+                        all_rel_pos_bias = []
+                        for i in range(nH1):
+                            z = table_pretrained[:, i].view(S1, S1)
+                            all_rel_pos_bias.append(
+                                torch.nn.functional.pad(z, padding, "constant", z.min().item() - 3).view(L2, 1))
+                        new_rel_pos_bias = torch.cat(all_rel_pos_bias, dim=-1)
+                        state_dict[k] = new_rel_pos_bias
+                    elif rpe_interpolation == 'geo':
+                        print_log(f"Interpolate relative_position_bias_table using geo for {k}", logger)
+                        src_size = int(L1 ** 0.5)
+                        dst_size = int(L2 ** 0.5)
 
                         def geometric_progression(a, r, n):
                             return a * (1.0 - r ** n) / (1.0 - r)
@@ -470,70 +493,26 @@ class HiViT2(BaseHiViT):
                         t = dst_size // 2.0
                         dx = np.arange(-t, t + 0.1, 1.0)
                         dy = np.arange(-t, t + 0.1, 1.0)
-                        print_log("x = {}".format(x), logger)
-                        print_log("dx = {}".format(dx), logger)
+
+                        print_log("Original positions = %s" % str(x), logger)
+                        print_log("Target positions = %s" % str(dx), logger)
 
                         all_rel_pos_bias = []
 
-                        for i in range(num_attn_heads):
-                            z = rel_pos_bias[:, i].view(src_size, src_size).float().numpy()
-                            f = interpolate.interp2d(x, y, z, kind='cubic')
-                            all_rel_pos_bias.append(
-                                torch.Tensor(f(dx, dy)).contiguous().view(-1, 1).to(rel_pos_bias.device))
+                        for i in range(nH1):
+                            z = table_pretrained[:, i].view(src_size, src_size).float().numpy()
+                            f_cubic = interpolate.interp2d(x, y, z, kind='cubic')
+                            all_rel_pos_bias.append(torch.Tensor(f_cubic(dx, dy)).contiguous().view(-1, 1).to(
+                                table_pretrained.device))
 
-                        rel_pos_bias = torch.cat(all_rel_pos_bias, dim=-1)
-                        new_rel_pos_bias = torch.cat((rel_pos_bias, extra_tokens), dim=0)
-                        state_dict[key] = new_rel_pos_bias
+                        new_rel_pos_bias = torch.cat(all_rel_pos_bias, dim=-1)
+                        state_dict[k] = new_rel_pos_bias
 
-            if 'pos_embed' in state_dict:
-                pos_embed_checkpoint = state_dict['pos_embed']
-                embedding_size = pos_embed_checkpoint.shape[-1]
-                num_patches = self.patch_embed.num_patches
-                num_extra_tokens = self.absolute_pos_embed.shape[-2] - num_patches
-                # height (== width) for the checkpoint position embedding
-                orig_size = int((pos_embed_checkpoint.shape[-2] - num_extra_tokens) ** 0.5)
-                # height (== width) for the new position embedding
-                new_size = int(num_patches ** 0.5)
-                # class_token and dist_token are kept unchanged
-                if orig_size != new_size:
-                    print_log("Position interpolate from %dx%d to %dx%d" % (orig_size, orig_size, new_size, new_size),
-                              logger)
-                    extra_tokens = pos_embed_checkpoint[:, :num_extra_tokens]
-                    # only the position tokens are interpolated
-                    pos_tokens = pos_embed_checkpoint[:, num_extra_tokens:]
-                    pos_tokens = pos_tokens.reshape(-1, orig_size, orig_size, embedding_size).permute(0, 3, 1, 2)
-                    pos_tokens = torch.nn.functional.interpolate(
-                        pos_tokens, size=(new_size, new_size), mode='bicubic', align_corners=False)
-                    pos_tokens = pos_tokens.permute(0, 2, 3, 1).flatten(1, 2)
-                    new_pos_embed = torch.cat((extra_tokens, pos_tokens), dim=1)
-                    state_dict['pos_embed'] = new_pos_embed
+        if 'relative_position_index' in state_dict:
+            state_dict.pop('relative_position_index')
 
-            # interpolate position bias table if needed
-            relative_position_bias_table_keys = [k for k in self.state_dict().keys() if
-                                                 "relative_position_bias_table" in k]
-            for k in relative_position_bias_table_keys:
-                if k not in state_dict.keys():
-                    continue
-
-                table_pretrained = state_dict[k]
-                table_current = self.state_dict()[k]
-                L1, nH1 = table_pretrained.size()
-                L2, nH2 = table_current.size()
-                if nH1 != nH2:
-                    print_log(f"Error in loading {k}, pass", logger, level=logging.WARNING)
-                else:
-                    if L1 != L2:
-                        raise ValueError("This part should not be excuted. Please check if geo interpolation work!!")
-                        # S1 = int(L1 ** 0.5)
-                        # S2 = int(L2 ** 0.5)
-                        # table_pretrained_resized = F.interpolate(
-                        #      table_pretrained.permute(1, 0).view(1, nH1, S1, S1),
-                        #      size=(S2, S2), mode='bicubic')
-                        # state_dict[table_key] = table_pretrained_resized.view(nH2, L2).permute(1, 0)
-            if 'relative_position_index' in state_dict:
-                state_dict.pop('relative_position_index')
-            # load state_dict
-            self.load_state_dict(state_dict, strict=False)
+        # load state_dict
+        self.load_state_dict(state_dict, strict=False)
 
     def interpolate_pos_encoding(self, x, h, w):
         npatch = x.shape[1]
