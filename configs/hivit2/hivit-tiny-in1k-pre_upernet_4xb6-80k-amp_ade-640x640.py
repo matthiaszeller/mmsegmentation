@@ -5,30 +5,30 @@ _base_ = [
 crop_size = (640, 640)
 data_preprocessor = dict(size=crop_size)
 
-pretrained = '../mmsegmentation/checkpoints/mae_hivit2_base_1600ep.pth'
+#pretrained = '../mmsegmentation/checkpoints/mae_hivit2_base_1600ep.pth'
 model = dict(
     data_preprocessor=data_preprocessor,
     backbone=dict(
         _delete_=True,
         type='HiViT2',
-        init_cfg=dict(type='Pretrained', checkpoint=pretrained),
+        #init_cfg=dict(type='Pretrained', checkpoint=pretrained),
         img_size=224,
         task_img_size=640,
         patch_size=16,
-        embed_dim=512,
-        depths=[2, 2, 20],
-        num_heads=8,
+        embed_dim=384,
+        depths=[1, 1, 10],
+        num_heads=6,
         mlp_ratio=4.,
         rpe=True,
         drop_path_rate=0.1,
         with_fpn=True,
-        out_indices=['H', 'M', 19, 19],
+        out_indices=['H', 'M', 9, 9],
         use_checkpoint=False,
     ),
     decode_head=dict(
-        in_channels=[128, 256, 512, 512],
+        in_channels=[96, 192, 384, 384],
         num_classes=150,
-        channels=1024,
+        channels=512,
     ),
     auxiliary_head=None,
     # auxiliary_head=dict(
@@ -60,12 +60,12 @@ param_scheduler = [
         eta_min=0.0,
         power=1.0,
         begin=1500,
-        end=160000,
+        end=80000,
         by_epoch=False,
     )
 ]
 
-train_dataloader = dict(batch_size=8)
+train_dataloader = dict(batch_size=6)
 
 # img_norm_cfg = dict(
 #     mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
