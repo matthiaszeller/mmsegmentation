@@ -180,9 +180,8 @@ class BaseHiViT(nn.Module):
 
         # absolute position embedding
         if ape:
-            num_patches = (img_size // patch_size) ** 2
             self.absolute_pos_embed = nn.Parameter(
-                torch.zeros(1, num_patches, self.num_features)
+                torch.zeros(1, self.patch_embed.num_patches, self.num_features)
             )
             trunc_normal_(self.absolute_pos_embed, std=.02)
         if rpe:
@@ -419,8 +418,10 @@ class HiViT2(BaseHiViT):
             N1, L, C1 = absolute_pos_embed.size()
             N2, L2, C2 = self.absolute_pos_embed.size()
             if N1 != N2 or C1 != C2 or L != L2:
-                # TODO implement interpolation
-                print_log("Error in loading absolute_pos_embed, pass, TODO IMPLEMENT", logger, level=logging.ERROR)
+                print_log(f'interpolating absolute positional embedding {absolute_pos_embed.shape} -> '
+                          f'{self.absolute_pos_embed.shape}', logger)
+                sz = self.patch_embed.img_size
+                state_dict['absolute_pos_embed'] = self.interpolate_pos_encoding(absolute_pos_embed, *sz)
             else:
                 state_dict['absolute_pos_embed'] = absolute_pos_embed
 
