@@ -42,10 +42,10 @@ class PackSegInputs(BaseTransform):
     """
 
     def __init__(self,
-                 meta_keys=('img_path', 'seg_map_path', 'ori_shape',
+                 meta_keys=('img_path', 'seg_map_path', 'zip_path', 'ori_shape',
                             'img_shape', 'pad_shape', 'scale_factor', 'flip',
                             'flip_direction', 'reduce_zero_label'),
-                 enable_3d: bool = False):
+                 enable_3d: bool = False,):
         self.meta_keys = meta_keys
         self.enable_3d = enable_3d
 
@@ -84,7 +84,7 @@ class PackSegInputs(BaseTransform):
                     warnings.warn('Please pay attention your ground truth '
                                   'segmentation map, expected 3D, but got '
                                   f'{results["gt_seg_map"].shape}')
-                elif len(results['gt_seg_map'].shape) != 2:
+                elif not self.enable_3d and (results['gt_seg_map'].shape) != 2:
                     warnings.warn('Please pay attention your ground truth '
                                   'segmentation map, usually the segmentation '
                                   'map is 2D, but got '

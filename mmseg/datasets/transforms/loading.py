@@ -581,6 +581,9 @@ class InferencerLoader(BaseTransform):
             dict(type='LoadImageFromFile', **kwargs))
         self.from_ndarray = TRANSFORMS.build(
             dict(type='LoadImageFromNDArray', **kwargs))
+        self.from_zipfile = TRANSFORMS.build(
+            dict(type='LoadImageFromZipFile', **kwargs)
+        )
 
     def transform(self, single_input: Union[str, np.ndarray, dict]) -> dict:
         """Transform function to add image meta information.
@@ -603,4 +606,6 @@ class InferencerLoader(BaseTransform):
 
         if 'img' in inputs:
             return self.from_ndarray(inputs)
+        elif 'zip_path' in inputs:
+            return self.from_zipfile(inputs)
         return self.from_file(inputs)

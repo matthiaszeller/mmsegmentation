@@ -69,7 +69,9 @@ class MMSegInferencer(BaseInferencer):
                  palette: Optional[Union[str, List]] = None,
                  dataset_name: Optional[str] = None,
                  device: Optional[str] = None,
-                 scope: Optional[str] = 'mmseg') -> None:
+                 scope: Optional[str] = 'mmseg',
+                 load_annot: bool = False) -> None:
+        self.load_annot = load_annot
         # A global counter tracking the number of images processes, for
         # naming of the output images
         self.num_visualized_imgs = 0
@@ -342,10 +344,13 @@ class MMSegInferencer(BaseInferencer):
         pipeline_cfg = cfg.test_dataloader.dataset.pipeline
         # Loading annotations is also not applicable
         idx = self._get_transform_idx(pipeline_cfg, 'LoadAnnotations')
-        if idx != -1:
+        if idx != -1 and not self.load_annot:
             del pipeline_cfg[idx]
         load_img_idx = self._get_transform_idx(pipeline_cfg,
                                                'LoadImageFromFile')
+        if load_img_idx == -1:
+            load_img_idx = self._get_transform_idx(pipeline_cfg,
+                                                   'LoadImageFromZipFile')
 
         if load_img_idx == -1:
             raise ValueError(
