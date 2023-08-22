@@ -8,6 +8,7 @@ model = dict(
     backbone=dict(
         init_cfg=dict(type='Pretrained', checkpoint=None),
         out_indices=(0, 1, 2, 3),
+        in_channels=[96, 192, 384, 384],
     ),
     decode_head=dict(
         channels=128,
