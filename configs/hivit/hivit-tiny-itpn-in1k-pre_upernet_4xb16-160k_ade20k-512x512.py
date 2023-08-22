@@ -1,5 +1,5 @@
 _base_ = [
-    '../_base_/models/upernet_hivit_tiny.py', '../_base_/datasets/ade20k-size16.py',
+    '../_base_/models/upernet_hivit_tiny.py', '../_base_/datasets/ade20k.py',
     '../_base_/default_runtime.py', '../_base_/schedules/schedule_160k.py'
 ]
 
@@ -11,11 +11,13 @@ model = dict(
         # change with --cfg-options model.backbone.init_cfg.checkpoint=<path to checkpoint>
         init_cfg=dict(type='Pretrained', checkpoint=None),
         pretrain_img_size=224,
-        ape=True,
         img_size=512,
+        ape=True,
+        rpe=True,
     ),
     decode_head=dict(num_classes=150),
-    auxiliary_head=dict(num_classes=150)
+    auxiliary_head=dict(num_classes=150),
+    test_cfg=dict(mode='slide', crop_size=crop_size, stride=(426, 426))
 )
 
 # optimizer wrapper
