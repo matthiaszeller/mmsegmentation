@@ -3,10 +3,21 @@ _base_ = [
     '../_base_/default_runtime.py', '../_base_/schedules/schedule_20k.py'
 ]
 
+crop_size=(512, 512)
+data_preprocessor = dict(
+    size=crop_size,
+    mean=[24.87],
+    std=[53.36],
+)
 
+checkpoint = 'checkpoints/itpn-pixel_hivit-tiny-p16_4xb100-amp-coslr-400e_ivoct-polar-gray_epoch-400.pth'
 model = dict(
+    data_preprocessor=data_preprocessor,
     backbone=dict(
-        init_cfg=dict(type='Pretrained', checkpoint=None),
+        in_chans=1,
+        init_cfg=dict(type='Pretrained', checkpoint=checkpoint),
+        pretrain_img_size=512,
+        img_size=512,
         out_indices=(0, 1, 2, 3),
     ),
     decode_head=dict(

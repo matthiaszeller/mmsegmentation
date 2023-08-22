@@ -688,6 +688,10 @@ class HiViT(BaseModule):
             x = x.transpose(1, 2).view(B, -1, Hp, Wp).contiguous()
             outs.append(x)
 
+        if 3 in self.out_indices:
+            x = nn.MaxPool2d(kernel_size=2, stride=2)(x)
+            outs.append(x)
+
         return tuple(outs)
 
     def _freeze_stages(self):
