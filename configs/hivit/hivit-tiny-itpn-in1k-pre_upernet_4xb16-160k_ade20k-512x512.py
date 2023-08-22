@@ -11,6 +11,7 @@ model = dict(
         # change with --cfg-options model.backbone.init_cfg.checkpoint=<path to checkpoint>
         init_cfg=dict(type='Pretrained', checkpoint=None),
         pretrain_img_size=224,
+        ape=True,
         img_size=512,
     ),
     decode_head=dict(num_classes=150),
@@ -28,6 +29,8 @@ optim_wrapper = dict(
         betas=(0.9, 0.95),
         weight_decay=0.05),
     paramwise_cfg=dict(
+        # no weight decay for biases
+        bias_decay_mult=0.0,
         custom_keys={
             'norm': dict(decay_mult=0.0),
             'bias': dict(decay_mult=0.0),
