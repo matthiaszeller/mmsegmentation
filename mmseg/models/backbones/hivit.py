@@ -1,18 +1,22 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+import logging
 import math
 from collections import OrderedDict
 
+import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+from mmcv.cnn import build_norm_layer
 from mmcv.cnn.bricks import DropPath
 from mmengine import print_log
+from mmengine.model import BaseModule
 from mmengine.model.weight_init import trunc_normal_, trunc_normal_init, constant_init
 from mmengine.runner import CheckpointLoader
+from mmengine.utils import to_2tuple
+from scipy import interpolate
 
 from mmseg.registry import MODELS
-from mmcv.cnn import build_norm_layer
-from mmengine.utils import to_2tuple
-from mmengine.model import BaseModule
 
 
 class Mlp(nn.Module):
@@ -557,6 +561,7 @@ class HiViT(BaseModule):
             return
 
         assert 'checkpoint' in self.init_cfg, 'checkpoint path must be specified'
+        print_log('loading checkpoint for hivit backbone')
 
         ckpt = CheckpointLoader.load_checkpoint(self.init_cfg['checkpoint'], map_location='cpu', logger='current')
         if 'state_dict' in ckpt:
@@ -575,14 +580,107 @@ class HiViT(BaseModule):
 
         # interpolate absolute position embedding
         if self.ape:
-            print_log('interpolating absolute positional encoding', logger='current')
+            before = state_dict['pos_embed'].shape
             state_dict['pos_embed'] = self.interpolate_pos_encoding(state_dict['pos_embed'],
                                                                     *self.pretrain_img_size, *self.img_size)
+            if before != state_dict['pos_embed'].shape:
+                print_log(f"interpolated absolute positional encoding "
+                          f"from {before} to {state_dict['pos_embed'].shape}", logger='current')
 
-        # TODO: interpolate relative position embedding
+        current_shape = self.blocks[self.num_main_blocks + 1].attn.relative_position_bias_table.shape
+        self.interpolate_rpe(state_dict, current_shape)
 
         # load state dict
         self.load_state_dict(state_dict, strict=False)
+        
+    @staticmethod
+    def interpolate_rpe(pretrained_state_dict: dict[str, torch.Tensor], current_shape: torch.Size,
+                        interpolation='geo', logger='current'):
+        """In place modification"""
+        relative_position_bias_table_keys = [
+            k
+            for k in pretrained_state_dict.keys()
+            if "relative_position_bias_table" in k
+        ]
+
+        for k in relative_position_bias_table_keys:
+            table_pretrained = pretrained_state_dict[k]
+            L1, nH1 = table_pretrained.size()
+            L2, nH2 = current_shape
+            if nH1 != nH2:
+                print_log(f"Error in loading {k}, pass", logger, level=logging.WARNING)
+            else:
+                if L1 != L2:
+                    if interpolation in ['bicubic', 'bilinear', 'nearest']:
+                        print_log(f"Interpolate relative_position_bias_table using {interpolation}", logger)
+                        S1 = int(L1 ** 0.5)
+                        S2 = int(L2 ** 0.5)
+                        table_pretrained_resized = F.interpolate(
+                            table_pretrained.permute(1, 0).view(1, nH1, S1, S1),
+                            size=(S2, S2), mode=interpolation)
+                        pretrained_state_dict[k] = table_pretrained_resized.view(nH2, L2).permute(1, 0)
+                    elif interpolation == 'outer_mask':
+                        print_log("Interpolate relative_position_bias_table using outer mask.", logger)
+                        S1 = int(L1 ** 0.5)
+                        S2 = int(L2 ** 0.5)
+                        pad_size = (S2 - S1) // 2
+                        padding = (pad_size, pad_size, pad_size, pad_size)
+
+                        all_rel_pos_bias = []
+                        for i in range(nH1):
+                            z = table_pretrained[:, i].view(S1, S1)
+                            all_rel_pos_bias.append(
+                                torch.nn.functional.pad(z, padding, "constant", z.min().item() - 3).view(L2, 1))
+                        new_rel_pos_bias = torch.cat(all_rel_pos_bias, dim=-1)
+                        pretrained_state_dict[k] = new_rel_pos_bias
+                    elif interpolation == 'geo':
+                        print_log(f"Interpolate relative_position_bias_table using geo for {k}", logger)
+                        src_size = int(L1 ** 0.5)
+                        dst_size = int(L2 ** 0.5)
+
+                        def geometric_progression(a, r, n):
+                            return a * (1.0 - r ** n) / (1.0 - r)
+
+                        left, right = 1.01, 1.5
+                        while right - left > 1e-6:
+                            q = (left + right) / 2.0
+                            gp = geometric_progression(1, q, src_size // 2)
+                            if gp > dst_size // 2:
+                                right = q
+                            else:
+                                left = q
+
+                        # if q > 1.13492:
+                        #     q = 1.13492
+
+                        dis = []
+                        cur = 1
+                        for i in range(src_size // 2):
+                            dis.append(cur)
+                            cur += q ** (i + 1)
+
+                        r_ids = [-_ for _ in reversed(dis)]
+
+                        x = r_ids + [0] + dis
+                        y = r_ids + [0] + dis
+
+                        t = dst_size // 2.0
+                        dx = np.arange(-t, t + 0.1, 1.0)
+                        dy = np.arange(-t, t + 0.1, 1.0)
+
+                        print_log("Original positions = %s" % str(x), logger)
+                        print_log("Target positions = %s" % str(dx), logger)
+
+                        all_rel_pos_bias = []
+
+                        for i in range(nH1):
+                            z = table_pretrained[:, i].view(src_size, src_size).float().numpy()
+                            f_cubic = interpolate.interp2d(x, y, z, kind='cubic')
+                            all_rel_pos_bias.append(torch.Tensor(f_cubic(dx, dy)).contiguous().view(-1, 1).to(
+                                table_pretrained.device))
+
+                        new_rel_pos_bias = torch.cat(all_rel_pos_bias, dim=-1)
+                        pretrained_state_dict[k] = new_rel_pos_bias
 
     def interpolate_pos_encoding(self, patch_pos_embed: torch.Tensor, H0, W0, H, W):
         """
