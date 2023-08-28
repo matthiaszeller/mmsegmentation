@@ -434,8 +434,10 @@ class HiViT(BaseModule):
                  kernel_size=None,
                  pad_size=None,
                  layer_scale_init_value=0.0,
+                 format_output=True,
                  init_cfg=None):
         super().__init__(init_cfg=init_cfg)
+        self.format_output = format_output
 
         if isinstance(arch, str):
             arch = arch.lower()
@@ -761,7 +763,7 @@ class HiViT(BaseModule):
             if isinstance(blk, PatchMerge):
                 # patch merging prepares data for next stage, we output before merging
                 if stage_counter in self.out_indices:
-                    out = self._format_output(x, H, W)
+                    out = self._format_output(x, H, W) if self.format_output else x
                     outs.append(out)
 
                 stage_counter += 1
@@ -783,10 +785,12 @@ class HiViT(BaseModule):
             x = blk(x, rpe_index)
 
         if stage_counter in self.out_indices:
-            x = x.transpose(1, 2).view(B, -1, Hp, Wp).contiguous()
+            if self.format_output:
+                x = x.transpose(1, 2).view(B, -1, Hp, Wp).contiguous()
             outs.append(x)
 
         if 3 in self.out_indices:
+            assert not self.format_output
             x = nn.MaxPool2d(kernel_size=2, stride=2)(x)
             outs.append(x)
 
