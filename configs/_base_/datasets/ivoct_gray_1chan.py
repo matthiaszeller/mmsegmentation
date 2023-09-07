@@ -1,10 +1,11 @@
-# dataset settings
-dataset_type = 'IVOCTZipDataset'
-data_root = 'data/shockwave/'
+
+_base_ = [
+    './ivoct.py'
+]
 
 crop_size = (512, 512)
 
-# images are PNG in palette mode, by default the colormap will be applied
+# images are PNG in palette mode, unchanged and pillow args will only load grayscale values
 _load_img = dict(type='LoadImageFromZipFile', imdecode_backend='pillow', color_type='unchanged')
 
 train_pipeline = [
@@ -12,10 +13,10 @@ train_pipeline = [
     dict(type='DuplicateImageChannels', num_repeat=1),
     dict(type='LoadAnnotations'),
     dict(type='Resize', scale=(512, 512), keep_ratio=True),
+    dict(type='RandomRotate', prob=1., degree=360, seg_pad_val=0),
     #dict(type='RandomResize', scale=(512, 512), ratio_range=(0.5, 2.0), keep_ratio=True),
     #dict(type='RandomCrop', crop_size=crop_size, cat_max_ratio=0.75),
-    dict(type='RandomFlip', prob=0.5, direction='vertical'),
-    dict(type='RandomRoll', axis=0),
+    dict(type='RandomFlip', prob=0.5),
     #dict(type='PhotoMetricDistortion'),
     dict(type='PackSegInputs')
 ]
@@ -31,38 +32,16 @@ test_pipeline = [
 ]
 
 
-# for Test Time Augmentation (tools/test.py --tta)
-tta_pipeline = None
-
 train_dataloader = dict(
-    batch_size=16,
-    num_workers=4,
-    persistent_workers=True,
-    sampler=dict(type='InfiniteSampler', shuffle=True),
     dataset=dict(
-        type=dataset_type,
-        data_root=data_root,
-        data_prefix=dict(img_path='images-3D-polar', seg_map_path='labels/polar'),
-        ann_file='splits/segmentation/train.txt',
         pipeline=train_pipeline
     )
 )
 
 val_dataloader = dict(
-    batch_size=1,
-    num_workers=4,
-    persistent_workers=True,
-    sampler=dict(type='DefaultSampler', shuffle=False),
     dataset=dict(
-        type=dataset_type,
-        data_root=data_root,
-        data_prefix=dict(img_path='images-3D-polar', seg_map_path='labels/polar'),
-        ann_file='splits/segmentation/val.txt',
         pipeline=test_pipeline
     )
 )
 
 test_dataloader = val_dataloader
-
-val_evaluator = dict(type='ClassIoUMetric', iou_metrics=['mIoU', 'mFscore'], prefix='metric')
-test_evaluator = val_evaluator
