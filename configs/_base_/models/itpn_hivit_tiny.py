@@ -29,7 +29,7 @@ model = dict(
         #  transformer pyramid
         fpn_dim=256,
         fpn_depth=2,
-        num_outs=4,
+        num_outs=3,
     ),
     decode_head=dict(
         type='UPerHead',
