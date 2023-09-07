@@ -11,9 +11,10 @@ crop_size = (512, 512)
 data_preprocessor = dict(size=crop_size)
 model = dict(
     data_preprocessor=data_preprocessor,
+    init_cfg=dict(type='Pretrained', checkpoint=None),
     backbone=dict(
         # change with --cfg-options model.backbone.init_cfg.checkpoint=<path to checkpoint>
-        init_cfg=dict(type='Pretrained', checkpoint=None),
+        
         pretrain_img_size=224,
         img_size=512,
     ),

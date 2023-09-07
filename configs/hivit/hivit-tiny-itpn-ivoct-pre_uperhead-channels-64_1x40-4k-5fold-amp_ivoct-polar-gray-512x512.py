@@ -1,5 +1,5 @@
 _base_ = [
-    '../_base_/models/itpn_hivit_tiny.py', '../_base_/datasets/ivoct_polar_gray_1chan.py',
+    '../_base_/models/upernet_hivit_tiny.py', '../_base_/datasets/ivoct_polar_gray_1chan.py',
     '../_base_/default_runtime.py', '../_base_/schedules/schedule_20k.py'
 ]
 
@@ -18,16 +18,12 @@ model = dict(
         init_cfg=dict(type='Pretrained', checkpoint=checkpoint),
         pretrain_img_size=512,
         img_size=512,
-        out_indices=(0, 1, 2, ),
+        out_indices=(0, 1, 2, 3),
     ),
-    neck=dict(
-        init_cfg=dict(type='Pretrained', checkpoint=checkpoint),
-    ),
-    # neck builds a 4th stage
     decode_head=dict(
         channels=64,
         num_classes=2,
-        in_channels=[352, 448, 640, 640],
+        in_channels=[96, 192, 384, 384],
         in_index=(0, 1, 2, 3),
     ),
     auxiliary_head=None

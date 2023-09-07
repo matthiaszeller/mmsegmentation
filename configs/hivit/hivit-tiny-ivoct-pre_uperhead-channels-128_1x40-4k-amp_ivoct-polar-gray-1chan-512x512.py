@@ -1,5 +1,5 @@
 _base_ = [
-    './hitvit-tiny_uperhead-channels-128_1x48-4k-amp_ivoct-polar-gray-512x512.py'
+    './hivit-tiny_uperhead-channels-128_1x40-4k-amp_ivoct-polar-gray-1chan-512x512.py'
 ]
 
 

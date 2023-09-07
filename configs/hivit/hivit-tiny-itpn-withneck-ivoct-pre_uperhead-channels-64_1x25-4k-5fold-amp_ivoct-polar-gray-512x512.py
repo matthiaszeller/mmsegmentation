@@ -1,5 +1,5 @@
 _base_ = [
-    '../_base_/models/upernet_hivit_tiny.py', '../_base_/datasets/ivoct_polar_gray_1chan.py',
+    '../_base_/models/itpn_hivit_tiny.py', '../_base_/datasets/ivoct_polar_gray_1chan.py',
     '../_base_/default_runtime.py', '../_base_/schedules/schedule_20k.py'
 ]
 
@@ -15,22 +15,23 @@ model = dict(
     data_preprocessor=data_preprocessor,
     backbone=dict(
         in_chans=1,
-        init_cfg=dict(type='Pretrained', checkpoint=checkpoint),
         pretrain_img_size=512,
         img_size=512,
-        out_indices=(0, 1, 2, 3),
+        out_indices=(0, 1, 2, ),
     ),
+    # neck builds a 4th stage
     decode_head=dict(
-        channels=128,
+        channels=64,
         num_classes=2,
-        in_channels=[96, 192, 384, 384],
-        in_index=(0, 1, 2, 3),
+        in_channels=[352, 448, 640],
+        in_index=(0, 1, 2),
     ),
-    auxiliary_head=None
+    auxiliary_head=None,
+    init_cfg=dict(type='Pretrained', checkpoint=checkpoint)
 )
 
 train_dataloader = dict(
-    batch_size=48,
+    batch_size=25,
     dataset=dict(
         # use --cfg-options to replace this argument with the correct fold id
         ann_file='splits/segmentation/train_fold<i>.txt'
@@ -59,6 +60,7 @@ optim_wrapper = dict(
             'norm': dict(decay_mult=0.0),
             'bias': dict(decay_mult=0.0),
             'pos_embed': dict(decay_mult=0.),
+            'relative_position_bias_table': dict(decay_mult=0.),
         }
     )
 )
@@ -71,7 +73,7 @@ param_scheduler = [
         type='LinearLR', start_factor=1e-6, by_epoch=False, begin=0, end=warmup_iters),
     dict(
         type='PolyLR',
-        eta_min=1e-8,
+        eta_min=0,
         power=1.0,
         begin=warmup_iters,
         end=4000,
@@ -87,4 +89,4 @@ default_hooks = dict(
     checkpoint=dict(save_best='metric/mIoU', rule='greater', max_keep_ckpts=5),
 )
 # Evaluate more often, takes few seconds only in this config
-train_cfg = dict(val_interval=200)
+train_cfg = dict(max_iters=4000, val_interval=200)

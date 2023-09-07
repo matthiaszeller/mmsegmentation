@@ -1,10 +1,13 @@
 _base_ = [
-    '../_base_/models/upernet_hivit_tiny.py', '../_base_/datasets/ivoct_polar_gray.py',
+    '../_base_/models/upernet_hivit_tiny.py', '../_base_/datasets/ivoct_polar_gray_1chan.py',
     '../_base_/default_runtime.py', '../_base_/schedules/schedule_20k.py'
 ]
 
+crop_size = (512, 512)
+data_preprocessor = dict(size=crop_size)
 
 model = dict(
+    data_preprocessor=data_preprocessor,
     decode_head=dict(
         channels=128,
         num_classes=2,
@@ -16,7 +19,7 @@ model = dict(
 )
 
 train_dataloader=dict(
-    batch_size=48,
+    batch_size=40,
     dataset=dict(
         # use --cfg-options to replace this argument with the correct fold id
         ann_file='splits/segmentation/train_fold<i>.txt'
@@ -67,4 +70,4 @@ default_hooks = dict(
     checkpoint=dict(save_best='metric/mIoU', rule='greater', max_keep_ckpts=10),
 )
 # Evaluate more often, takes few seconds only in this config
-train_cfg = dict(val_interval=200)
+train_cfg = dict(max_iters=4000, val_interval=200)
