@@ -589,8 +589,9 @@ class HiViT(BaseModule):
                 print_log(f"interpolated absolute positional encoding "
                           f"from {before} to {state_dict['pos_embed'].shape}", logger='current')
 
-        current_shape = self.blocks[self.num_main_blocks + 1].attn.relative_position_bias_table.shape
-        self.interpolate_rpe(state_dict, current_shape)
+        if self.rpe:
+            current_shape = self.blocks[self.num_main_blocks + 1].attn.relative_position_bias_table.shape
+            self.interpolate_rpe(state_dict, current_shape)
 
         # load state dict
         self.load_state_dict(state_dict, strict=False)
@@ -786,7 +787,7 @@ class HiViT(BaseModule):
 
         if stage_counter in self.out_indices:
             if self.format_output:
-                x = x.transpose(1, 2).view(B, -1, Hp, Wp).contiguous()
+                x = self._format_output(x.unsqueeze(2).unsqueeze(2), H, W)
             outs.append(x)
 
         if 3 in self.out_indices:
