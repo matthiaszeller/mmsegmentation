@@ -86,7 +86,8 @@ class BaseDecodeHeadPseudo3D(BaseModule, metaclass=ABCMeta):
     def __init__(self,
                  in_channels,
                  channels,
-                 volume_depth: int = 4,
+                 n_slice: int = 4,
+                 slices_to_batch: bool = True,
                  *,
                  num_classes,
                  out_channels=None,
@@ -108,7 +109,7 @@ class BaseDecodeHeadPseudo3D(BaseModule, metaclass=ABCMeta):
                      type='Normal', std=0.01, override=dict(name='conv_seg'))):
         super().__init__(init_cfg)
         self._init_inputs(in_channels, in_index, input_transform)
-        self.volume_depth = volume_depth
+        self.n_slice = n_slice
         self.channels = channels
         self.dropout_ratio = dropout_ratio
         self.conv_cfg = conv_cfg
@@ -119,9 +120,11 @@ class BaseDecodeHeadPseudo3D(BaseModule, metaclass=ABCMeta):
         self.ignore_index = ignore_index
         self.align_corners = align_corners
 
-        assert self.volume_depth > 0
-        assert (self.channels % self.volume_depth == 0), 'channels must be divisible by volume_depth'
-        self.channels_per_frame = self.channels // self.volume_depth
+        assert self.n_slice > 0
+        self.channels_per_frame = self.channels
+        if slices_to_batch:
+            assert (self.channels % self.n_slice == 0), 'channels must be divisible by volume_depth'
+            self.channels_per_frame = self.channels // self.n_slice
 
         if out_channels is None:
             if num_classes == 2:
@@ -251,8 +254,8 @@ class BaseDecodeHeadPseudo3D(BaseModule, metaclass=ABCMeta):
         """
         N, C, *spatial_dims = x.shape
         return x.reshape(
-            N * self.volume_depth,
-            C // self.volume_depth,
+            N * self.n_slice,
+            C // self.n_slice,
             *spatial_dims,
         )
 

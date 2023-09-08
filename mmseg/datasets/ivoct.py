@@ -90,9 +90,9 @@ class IVOCTZipDataset(IVOCTDataset):
             basename, *slicenums = img_name.split('_')
             slicenums = list(map(int, slicenums))
             if self.enable_3d:
-                assert len(slicenums) > 1, f'3D mode requires at least 2 slices, got {slicenums}'
+                assert len(slicenums) > 1, f'3D mode requires at least 2 slices, got {len(slicenums)}'
             else:
-                assert len(slicenums) == 1, f'2D mode requires exactly 1 slice, got {slicenums}'
+                assert len(slicenums) == 1, f'2D mode requires exactly 1 slice, got {len(slicenums)}'
 
             zip_path = img_dir.joinpath(basename).with_suffix('.zip')
             img_path = get_frame_path(basename, slicenums, self.img_suffix)

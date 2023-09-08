@@ -26,6 +26,7 @@ from .unet import UNet
 from .vit import VisionTransformer
 from .hivit import HiViT
 from .hivit2 import HiViT2
+from .hivit_3d import HiViT3D
 
 __all__ = [
     'ResNet', 'ResNetV1c', 'ResNetV1d', 'ResNeXt', 'HRNet', 'FastSCNN',
@@ -33,5 +34,5 @@ __all__ = [
     'VisionTransformer', 'SwinTransformer', 'MixVisionTransformer',
     'BiSeNetV1', 'BiSeNetV2', 'ICNet', 'TIMMBackbone', 'ERFNet', 'PCPVT',
     'SVT', 'STDCNet', 'STDCContextPathNet', 'BEiT', 'MAE', 'PIDNet', 'MSCAN',
-    'CSWinTransformer', 'CSWinTransformer2', 'HiViT', 'HiViT2'
+    'CSWinTransformer', 'CSWinTransformer2', 'HiViT', 'HiViT2', 'HiViT3D'
 ]

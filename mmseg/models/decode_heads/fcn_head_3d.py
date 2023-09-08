@@ -15,7 +15,7 @@ class FCNHeadPseudo3D(BaseDecodeHeadPseudo3D):
     This head is implemented of `FCNNet <https://arxiv.org/abs/1411.4038>`_.
 
     Args:
-        volume_depth (int): Number of slices in the 3D volume.
+        n_slice (int): Number of slices in the 3D volume.
         num_convs (int): Number of convs in the head. Default: 2.
         kernel_size (int): The kernel size for convs in the head. Default: 3.
         concat_input (bool): Whether concat the input and output of convs
@@ -24,7 +24,7 @@ class FCNHeadPseudo3D(BaseDecodeHeadPseudo3D):
     """
 
     def __init__(self,
-                 volume_depth=4,
+                 n_slice=4,
                  num_convs=2,
                  kernel_size=3,
                  concat_input=True,
@@ -32,14 +32,14 @@ class FCNHeadPseudo3D(BaseDecodeHeadPseudo3D):
                  **kwargs):
         assert num_convs >= 0 and dilation > 0 and isinstance(dilation, int)
 
-        self.volume_depth = volume_depth
+        self.volume_depth = n_slice
         self.num_convs = num_convs
         self.concat_input = concat_input
         self.kernel_size = kernel_size
         super().__init__(**kwargs)
 
-        assert volume_depth > 0 and isinstance(volume_depth, int)
-        assert self.channels % volume_depth == 0, 'channels must be divisible by volume_depth'
+        assert n_slice > 0 and isinstance(n_slice, int)
+        assert self.channels % n_slice == 0, 'channels must be divisible by volume_depth'
 
         if num_convs == 0:
             assert self.in_channels == self.channels
@@ -57,7 +57,7 @@ class FCNHeadPseudo3D(BaseDecodeHeadPseudo3D):
             act_cfg=self.act_cfg
         )
 
-        channel_per_frame = self.channels // volume_depth
+        channel_per_frame = self.channels // n_slice
         convs = [
             ConvModule(
                 channel_per_frame,
