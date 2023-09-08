@@ -90,6 +90,10 @@ class PackSegInputs(BaseTransform):
                                   'map is 2D, but got '
                                   f'{results["gt_seg_map"].shape}')
                 data = to_tensor(results['gt_seg_map'].astype(np.int64))
+                # annotations are stacked on last dim, pull last dim first
+                if self.enable_3d:
+                    data = data.movedim(-1, 0)
+
             gt_sem_seg_data = dict(data=data)
             data_sample.gt_sem_seg = PixelData(**gt_sem_seg_data)
 

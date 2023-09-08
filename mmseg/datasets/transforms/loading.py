@@ -201,10 +201,11 @@ class LoadAnnotations(MMCV_LoadAnnotations):
 
         if isinstance(results['seg_map_path'], (list, tuple)):
             assert self.enable_3d, '3D segmentation map is not enabled'
+            # stack seg maps along last dimension for compatibility with some transforms (e.g. 3D)
             gt_semantic_seg = np.stack([
                 self._load_seg_map_file(seg_map_path)
                 for seg_map_path in results['seg_map_path']
-            ])
+            ], axis=-1)
         else:
             gt_semantic_seg = self._load_seg_map_file(results['seg_map_path'])
 
