@@ -60,5 +60,5 @@ val_dataloader = dict(
 
 test_dataloader = val_dataloader
 
-val_evaluator = dict(type='ClassIoUMetric', iou_metrics=['mIoU', 'mFscore'], prefix='metric')
+val_evaluator = dict(type='ClassIoUMetric', iou_metrics=['mIoU', 'mFscore', 'mDice'], prefix='metric')
 test_evaluator = val_evaluator
