@@ -671,3 +671,82 @@ class iTPNNeck(BaseModule):
         features = tuple(reversed(features))
         return features
 
+
+@MODELS.register_module()
+class iTPNNeck3D(iTPNNeck):
+
+    def __init__(self,
+                 n_slice: int = 3,
+                 **kwargs) -> None:
+        self.n_slice = n_slice
+        super().__init__(**kwargs)
+
+    def forward_features(self, x: torch.Tensor) -> list[torch.Tensor]:
+        """The forward function.
+
+        The process computes the visible patches' features vectors and the mask
+        tokens to output feature vectors, which will be used for
+        reconstruction.
+
+        Args:
+            x (torch.Tensor): hidden features, which is of shape
+                    B x C x H x W.
+
+        Returns:
+            torch.Tensor:
+        """
+        features = x[:2]
+        x = x[-1]
+        B, L, _ = x.shape
+        x = x[..., None, None, :]
+        features += (x,)
+        Hp = Wp = int(math.sqrt(L / self.n_slice))
+
+        outs = [x] if self.align_dim_16tofpn is None else [
+            self.align_dim_16tofpn(x)
+        ]
+        if self.num_outs >= 2:
+            x = self.block_16to8(
+                self.split_16to8(x) + self.align_dim_16to8(features[1]))
+            outs.append(x)
+        if self.num_outs >= 3:
+            x = self.block_8to4(
+                self.split_8to4(x) + self.align_dim_8to4(features[0]))
+            outs.append(x)
+
+        # Code block: from mmpretrain iTPN
+        # if self.num_outs > 3:
+        #     outs = [
+        #         out.reshape(B, Hp, Wp, *out.shape[-3:]).permute(
+        #             0, 5, 1, 3, 2, 4).reshape(B, -1, Hp * out.shape[-3],
+        #                                       Wp * out.shape[-2]).contiguous()
+        #         for out in outs
+        #     ]
+        #     if self.num_outs >= 4:
+        #         outs.insert(0, F.avg_pool2d(outs[0], kernel_size=2, stride=2))
+        #     if self.num_outs >= 5:
+        #         outs.insert(0, F.avg_pool2d(outs[0], kernel_size=2, stride=2))
+        #
+        # for i, out in enumerate(outs):
+        #     out = self.fpn_modules[i](out)
+        #     outs[i] = out
+
+        # Code block: from original iTPN
+        len_feat = len(features)
+        for i, out in enumerate(outs):
+            out = torch.cat([self.fpn_modules[i](out), features[len_feat - i - 1]], dim=-1)
+            outs[i] = out
+
+        # format tensors to image view
+        outs = [
+            out.reshape(B * self.n_slice, Hp, Wp, *out.shape[-3:]).permute(0, 5, 1, 3, 2, 4).reshape(
+                B * self.n_slice, -1, Hp * out.shape[-3], Wp * out.shape[-2]).contiguous()
+            for out in outs
+        ]
+
+        if self.num_outs >= 4:
+            outs.insert(0, F.max_pool2d(outs[0], kernel_size=2, stride=2))
+        if self.num_outs >= 5:
+            outs.insert(0, F.max_pool2d(outs[0], kernel_size=2, stride=2))
+
+        return tuple(outs)
