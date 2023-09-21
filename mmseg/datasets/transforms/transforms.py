@@ -11,6 +11,7 @@ from mmcv.transforms.utils import cache_randomness
 from mmengine.utils import is_tuple_of
 from numpy import random
 from scipy.ndimage import gaussian_filter
+from skimage.util import random_noise
 
 from mmseg.datasets.dataset_wrappers import MultiImageMixDataset
 from mmseg.registry import TRANSFORMS
@@ -47,6 +48,31 @@ class DuplicateImageChannels(BaseTransform):
         repr_str = self.__class__.__name__
         repr_str += f'(num_repeat={self.num_repeat})'
         return repr_str
+
+
+@TRANSFORMS.register_module()
+class RandomSpeckleNoise(BaseTransform):
+    """
+
+    """
+
+    def __init__(self, prob: float = 0.2, mean = 0.0, var = 0.05):
+        self.prob = prob
+        self.mean = mean
+        self.var = var
+
+    def transform(self,
+                  results: Dict) -> Optional[Union[Dict, Tuple[List, List]]]:
+        if np.random.rand() < self.prob:
+            img = results['img']
+            if not img.dtype == np.uint8:
+                raise NotImplementedError
+
+            img = random_noise(img, mode='speckle', mean=self.mean, var=self.var, clip=True, )
+            img = (img * 255).round().astype(np.uint8)
+            results['img'] = img
+
+        return results
 
 
 @TRANSFORMS.register_module()
