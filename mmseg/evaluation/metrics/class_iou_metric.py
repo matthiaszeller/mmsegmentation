@@ -91,7 +91,9 @@ class ClassIoUMetric(IoUMetric):
         total_area_union = sum(results[1])
         total_area_pred_label = sum(results[2])
         total_area_label = sum(results[3])
-        area_intersect, area_union, area_pred_label, area_label = torch.from_numpy(np.stack(results))
+        area_intersect, area_union, area_pred_label, area_label = torch.stack([
+            torch.stack(e) for e in results
+        ])
         ret_metrics = self.total_area_to_metrics(
             total_area_intersect, total_area_union, total_area_pred_label,
             total_area_label, self.metrics, self.nan_to_num, self.beta)
