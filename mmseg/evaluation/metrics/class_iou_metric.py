@@ -4,6 +4,7 @@ from collections import OrderedDict
 from typing import Dict, List, Optional
 
 import numpy as np
+import torch
 from mmengine.dist import is_main_process
 from mmengine.logging import MMLogger, print_log
 from mmengine.utils import mkdir_or_exist
@@ -90,9 +91,13 @@ class ClassIoUMetric(IoUMetric):
         total_area_union = sum(results[1])
         total_area_pred_label = sum(results[2])
         total_area_label = sum(results[3])
+        area_intersect, area_union, area_pred_label, area_label = torch.from_numpy(np.stack(results))
         ret_metrics = self.total_area_to_metrics(
             total_area_intersect, total_area_union, total_area_pred_label,
             total_area_label, self.metrics, self.nan_to_num, self.beta)
+        ret_metrics.update(self.area_to_metrics(
+            area_intersect, area_union, area_pred_label,
+            area_label, self.metrics, self.nan_to_num, self.beta))
 
         class_names = self.dataset_meta['classes']
 
@@ -141,3 +146,87 @@ class ClassIoUMetric(IoUMetric):
 
         return values_dict
 
+    @staticmethod
+    def area_to_metrics(area_intersect: np.ndarray,
+                        area_union: np.ndarray,
+                        area_pred_label: np.ndarray,
+                        area_label: np.ndarray,
+                        metrics: List[str] = ['mIoU'],
+                        nan_to_num: Optional[int] = None,
+                        beta: int = 1):
+        """Calculate evaluation metrics
+        Args:
+            area_intersect (np.ndarray): The intersection of prediction
+                and ground truth histogram on all classes.
+            area_union (np.ndarray): The union of prediction and ground
+                truth histogram on all classes.
+            area_pred_label (np.ndarray): The prediction histogram on
+                all classes.
+            area_label (np.ndarray): The ground truth histogram on
+                all classes.
+            metrics (List[str] | str): Metrics to be evaluated, 'mIoU' and
+                'mDice'.
+            nan_to_num (int, optional): If specified, NaN values will be
+                replaced by the numbers defined by the user. Default: None.
+            beta (int): Determines the weight of recall in the combined score.
+                Default: 1.
+        Returns:
+            Dict[str, np.ndarray]: per category evaluation metrics,
+                shape (num_classes, ).
+        """
+
+        def f_score(precision, recall, beta=1):
+            """calculate the f-score value.
+
+            Args:
+                precision (float | torch.Tensor): The precision value.
+                recall (float | torch.Tensor): The recall value.
+                beta (int): Determines the weight of recall in the combined
+                    score. Default: 1.
+
+            Returns:
+                [torch.tensor]: The f-score value.
+            """
+            score = (1 + beta**2) * (precision * recall) / (
+                (beta**2 * precision) + recall)
+            return score
+
+        if isinstance(metrics, str):
+            metrics = [metrics]
+        allowed_metrics = ['mIoU', 'mDice', 'mFscore']
+        if not set(metrics).issubset(set(allowed_metrics)):
+            raise KeyError(f'metrics {metrics} is not supported')
+
+        all_acc = area_intersect.sum(1) / area_label.sum(1)
+        ret_metrics = OrderedDict({'aAcc': all_acc})
+        for metric in metrics:
+            if metric == 'mIoU':
+                iou = area_intersect / area_union
+                acc = area_intersect / area_label
+                ret_metrics['lIoU'] = iou
+                ret_metrics['lAcc'] = acc
+            elif metric == 'mDice':
+                dice = 2 * area_intersect / (
+                        area_pred_label + area_label)
+                acc = area_intersect / area_label
+                ret_metrics['lDice'] = dice
+                ret_metrics['lAcc'] = acc
+            elif metric == 'mFscore':
+                precision = area_intersect / area_pred_label
+                recall = area_intersect / area_label
+                f_value = f_score(precision, recall, beta)
+                ret_metrics['lFscore'] = f_value
+                ret_metrics['lPrecision'] = precision
+                ret_metrics['lRecall'] = recall
+
+        ret_metrics = {
+            # average over samples
+            metric: value.nanmean(0).numpy()
+            for metric, value in ret_metrics.items()
+        }
+        if nan_to_num is not None:
+            ret_metrics = OrderedDict({
+                metric: np.nan_to_num(metric_value, nan=nan_to_num)
+                for metric, metric_value in ret_metrics.items()
+            })
+        return ret_metrics
